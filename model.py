@@ -1,57 +1,52 @@
 import dspy
 import os
 from utils import segment
-import spacy
 
 # following functions associated with the models, 
 # for a better performance, we set a --llm option in both command line
 # and gradio interface to allow users to specify the model they want to use. 
 
-def translate_zh(vtt_path):
+def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
     """
-    Translate English VTT content to Chinese and create a bilingual markdown file.
-
+    Translate English VTT content to a bilingual markdown file using the target language provided.
+    
     Args:
         vtt_path (str): Path to the English VTT file
-
+        output_dir (str): Directory for output files
+        translate_language (str): Target language for translation
+        llm (str): LLM model identifier
+        
     Returns:
         str: Path to the generated markdown file
     """
-    # Get segmented English text
     segmented_text = segment(vtt_path, sentence_count=10)
     paragraphs = segmented_text.split("\n\n")
-
-    # Configure dspy
+    
+    # Use provided LLM model or default to "ollama/qwen2.5"
+    model_id = llm.strip() if llm.strip() else "ollama/qwen2.5"
     lm = dspy.LM(
         base_url="http://localhost:11434",
-        model="ollama/qwen2.5",
+        model=model_id,
         max_tokens=50000,
         temperature=0.1,
     )
     dspy.configure(lm=lm)
 
-    class TranslateToZh(dspy.Signature):
-        """Translate English text to Chinese maintaining accuracy and natural expression."""
-
+    class Translate(dspy.Signature):
         english_text = dspy.InputField(desc="English text to translate")
-        chinese_translation = dspy.OutputField(desc="Chinese translation")
+        translated_text = dspy.OutputField(desc=f"Translation into {translate_language}")
 
-    translator = dspy.ChainOfThought(TranslateToZh)
+    translator = dspy.ChainOfThought(Translate)
     translated_pairs = []
 
-    # Process each paragraph
     for para in paragraphs:
         if para.strip():
             response = translator(english_text=para)
             translated_pairs.append(
-                f"# English\n{para}\n\n# 中文\n{
-                    response.chinese_translation}\n\n---\n"
+                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
             )
 
-    # Combine all translations
     markdown_content = "\n".join(translated_pairs)
-
-    # Save as markdown file
     output_file = os.path.splitext(vtt_path)[0] + "_bilingual.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(markdown_content)
@@ -59,13 +54,18 @@ def translate_zh(vtt_path):
     return output_file
 
 
-def rewrite_zh(file_path):
+def rewrite(file_path, output_dir=None):
     """Rewrites text by first segmenting the file into paragraphs,
     then rewriting each paragraph one at a time. This is the Chinese rewrite function.
     
+    Args:
+        file_path (str): Path to the text file (typically a VTT file).
+        output_dir (str, optional): Directory to save the rewritten markdown file.
+        
     Returns:
-        str: The rewritten text (Chinese)
+        str: Path to the generated markdown file if output_dir is provided, otherwise the rewritten text.
     """
+    from utils import segment  # ensure segment is available
     # Get segmented text (paragraphs separated by double newlines)
     segmented_text = segment(file_path)
     paragraphs = segmented_text.split("\n\n")
@@ -73,13 +73,16 @@ def rewrite_zh(file_path):
     # Set up spacy model (using English or Chinese model as needed; here we assume "en")
     language = "en"
     if language == "zh":
+        import spacy
         nlp = spacy.load("zh_core_web_sm")
     elif language == "en":
+        import spacy
         nlp = spacy.load("en_core_web_sm")
     else:
         raise ValueError("Invalid language. Supported languages are 'zh' and 'en'.")
     
     # Configure the LM without hard-coding the model parameter (this will be patched externally)
+    import dspy
     lm = dspy.LM(
         base_url="http://localhost:11434",
         max_tokens=50000,
@@ -104,4 +107,10 @@ def rewrite_zh(file_path):
         rewritten_paragraphs.append(response.rewritten)
     
     rewritten_text = "\n\n".join(rewritten_paragraphs)
+    if output_dir:
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        out_file = os.path.join(output_dir, f"{base_name}_rewritten.md")
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(rewritten_text)
+        return out_file
     return rewritten_text

@@ -16,21 +16,27 @@ import fasttext  # new import for language detection
 # to vtts text files.
 
 
-def parse_subtitle(file_path):
-    """Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame."""
-    try:
-        with open(file_path, "r", encoding="utf-8-sig", errors="replace") as file:
-            lines = file.readlines()
-    except FileNotFoundError:
-        return pd.DataFrame(columns=["Timestamps", "Content"])
-    except ImportError:
-        print("pysrt library not found. Falling back to less robust parsing.")
-
+def parse_subtitle(file_path, vtt_file=None):
+    """
+    Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame.
+    If vtt_file is provided, it will be used directly as the content.
+    """
+    import pandas as pd
+    if vtt_file is None:
+        try:
+            with open(file_path, "r", encoding="utf-8-sig", errors="replace") as file:
+                lines = file.readlines()
+        except FileNotFoundError:
+            return pd.DataFrame(columns=["Timestamps", "Content"])
+        except ImportError:
+            print("pysrt library not found. Falling back to less robust parsing.")
+    else:
+        lines = vtt_file.splitlines()
+        
     timestamps = []
     contents = []
     current_content = []
-
-    if file_path.lower().endswith(".txt"):
+    if file_path.lower().endswith(".txt") or (vtt_file is not None and file_path.lower().endswith(".txt")):
         contents = lines
         timestamps = [""] * len(contents)
     else:
@@ -90,26 +96,25 @@ def transcribe(file_path, language=None):
 
     Args:
         file_path (str): Path to the audio file
-        language (str, optional): Language code for transcription
+        language (str, optional): Language code for transcription. If not provided, auto-detection is used.
 
     Returns:
-        str: Path to the generated VTT file
+        tuple: (Path to the generated VTT file, auto-detected language)
     """
     base, ext = os.path.splitext(file_path)
     ext = ext.lower()
 
     model = whisper.load_model("large-v3-turbo", device="cpu")
-
-    # Use a specified language if provided, otherwise use auto-detection
     result = model.transcribe(
         file_path, fp16=False, verbose=True, language=language if language else None
     )
+    detected_language = result.get(
+        "language", language if language else "unknown")
 
     # Create VTT content with proper timestamps
     vtt_content = ["WEBVTT\n"]
-
-    # Process segments with timestamps
     for segment in result["segments"]:
+        # ...existing timestamp formatting...
         hours = int(segment["start"] // 3600)
         minutes = int((segment["start"] % 3600) // 60)
         start_seconds = segment["start"] % 60
@@ -120,14 +125,13 @@ def transcribe(file_path, language=None):
         start_time = f"{hours:02d}:{minutes:02d}:{start_seconds:06.3f}"
         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
         text = segment["text"].strip()
-
         vtt_content.append(f"\n{start_time} --> {end_time}\n{text}")
 
     out_file = os.path.abspath(base + ".vtt")
     with open(out_file, "w", encoding="utf-8") as f:
         f.write("".join(vtt_content))
 
-    return out_file
+    return out_file, detected_language
 
 
 def segment(file_path, sentence_count=8):
@@ -212,48 +216,6 @@ def download_audio(url, output_dir=None):
         raise Exception(f"Error downloading audio: {str(e)}")
 
 
-def transcribe_en(file_path):
-    """
-    Transcribe an audio file to English and save as a VTT file with proper timestamps.
-
-    Args:
-        file_path (str): Path to the WAV audio file
-
-    Returns:
-        str: Path to the generated VTT file
-    """
-    import whisper
-
-    base, ext = os.path.splitext(file_path)
-    ext = ext.lower()
-    model = whisper.load_model("large-v3-turbo", device="cpu")
-    result = model.transcribe(file_path, fp16=False, language="en", verbose=True)
-
-    vtt_content = ["WEBVTT\n"]
-    # Process segments with inline timestamp formatting
-    for segment in result["segments"]:
-        start = segment["start"]
-        end = segment["end"]
-        hours_start = int(start // 3600)
-        minutes_start = int((start % 3600) // 60)
-        seconds_start = start % 60
-        hours_end = int(end // 3600)
-        minutes_end = int((end % 3600) // 60)
-        seconds_end = end % 60
-
-        start_time = f"{hours_start:02d}:{minutes_start:02d}:{seconds_start:06.3f}"
-        end_time = f"{hours_end:02d}:{minutes_end:02d}:{seconds_end:06.3f}"
-
-        text = segment["text"].strip()
-        vtt_content.append(f"\n{start_time} --> {end_time}\n{text}")
-
-    out_file = os.path.abspath(base + ".vtt")
-    with open(out_file, "w", encoding="utf-8") as f:
-        f.write("".join(vtt_content))
-
-    return out_file
-
-
 def video_to_audio(video_path, output_dir=None):
     """
     Extracts audio from a video file and converts it to WAV format.
@@ -287,49 +249,51 @@ def language_detect(file_path):
     Detects the language of a text file using fastText.
     Handles different encodings and binary files gracefully.
     Includes common Chinese encodings.
-    
+
     Args:
         file_path (str): Path to the text file.
-        
+
     Returns:
         str: Detected language code (e.g., "en" or "zh").
     """
-    model = fasttext.load_model("lid.176.bin")
-    
+    model = fasttext.load_model("model/lid.176.bin")
+
     # Try different encodings, including Chinese-specific ones
     encodings = [
-        'utf-8', 
-        'utf-16', 
-        'utf-32', 
-        'gb2312',    # Simplified Chinese
-        'gbk',       # Chinese unified
-        'gb18030',   # Chinese national standard
-        'big5',      # Traditional Chinese
-        'big5hkscs', # Hong Kong variant
-        'ascii', 
-        'iso-8859-1', 
-        'cp1252'
+        "utf-8",
+        "utf-16",
+        "utf-32",
+        "gb2312",  # Simplified Chinese
+        "gbk",  # Chinese unified
+        "gb18030",  # Chinese national standard
+        "big5",  # Traditional Chinese
+        "big5hkscs",  # Hong Kong variant
+        "ascii",
+        "iso-8859-1",
+        "cp1252",
     ]
     text = None
-    
+
     for encoding in encodings:
         try:
-            with open(file_path, 'r', encoding=encoding) as f:
+            with open(file_path, "r", encoding=encoding) as f:
                 text = f.read()
             break  # if successful, exit the loop
         except (UnicodeDecodeError, LookupError):
             continue
-    
+
     if text is None:
-        print(f"Warning: Could not decode file {file_path} - defaulting to 'zh'")
+        print(f"Warning: Could not decode file {
+              file_path} - defaulting to 'zh'")
         return "zh"
-    
+
     try:
         labels, _ = model.predict(text, k=1)
         lang = labels[0].replace("__label__", "")
         return lang
     except Exception as e:
-        print(f"Warning: Language detection failed - {str(e)} - defaulting to 'zh'")
+        print(
+            f"Warning: Language detection failed - {str(e)} - defaulting to 'zh'")
         return "zh"
 
 
@@ -356,7 +320,8 @@ def audio_wav(audio_path, output_dir=None):
 
     try:
         audio_clip = AudioFileClip(audio_path)
-        audio_clip.write_audiofile(wav_path, codec="pcm_s16le")  # PCM format for WAV
+        audio_clip.write_audiofile(
+            wav_path, codec="pcm_s16le")  # PCM format for WAV
         audio_clip.close()
         return wav_path
     except Exception as e:
