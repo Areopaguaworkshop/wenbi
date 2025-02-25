@@ -28,56 +28,86 @@ def process_input(file_path=None, url="", language="", llm="", multi_language=Fa
     if not file_path and not url:
         return "Error: No input provided", None, None, None
     
-    # Define supported extensions
-    video_exts = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".webm", ".m4v"}
-    audio_exts = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus"}
-    subtitle_exts = {".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi", ".txt"}
-    
-    # Process based on input type
-    if url:
-        try:
-            file_path = download_audio(url.strip())
-            lang = language if language.strip() else None
-            vtt_file, auto_lang = transcribe(file_path, language=lang)
-        except Exception as e:
-            print(f"Error downloading from URL: {e}")
-            return "Error: Failed to process URL", None, None, None
-    elif file_path:
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-        if ext in video_exts:
-            audio_file = video_to_audio(file_path)
-            lang = language if language.strip() else None
-            vtt_file, auto_lang = transcribe(audio_file, language=lang)
-        elif ext in audio_exts:
-            lang = language if language.strip() else None
-            wav_file = audio_wav(file_path)
-            vtt_file, auto_lang = transcribe(wav_file, language=lang)
-        elif ext in subtitle_exts:
-            vtt_file = file_path
-            auto_lang = language or "unknown"
-        else:
-            print(f"Warning: Unknown file type {ext}, treating as subtitle file")
-            vtt_file = file_path
-            auto_lang = language or "unknown"
+    # If multi_language is True, use muti-lang.py functions.
+    if multi_language:
+        from mutilang import transcribe_multi_speaker, speaker_vtt
+        # Assume file_path is an audio file already (if url, handle as usual)
+        if url:
+            try:
+                file_path = download_audio(url.strip())
+            except Exception as e:
+                print(f"Error downloading from URL: {e}")
+                return "Error: Failed to process URL", None, None, None
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        # Get multi-speaker transcriptions
+        transcriptions = transcribe_multi_speaker(file_path)
+        # Generate separate VTT files per speaker
+        speaker_vtt_files = speaker_vtt(transcriptions, output_dir=out_dir, base_filename=base_name)
         
-    # Generate CSV after getting VTT file
-    _, filename = os.path.split(vtt_file)
-    base_name, _ = os.path.splitext(filename)
-    csv_file_path = os.path.join(out_dir, base_name + ".csv")
-    vtt_df = parse_subtitle(vtt_file)
-    vtt_df.to_csv(csv_file_path, index=True, encoding='utf-8', line_terminator='\n')
-    print(f"CSV file '{csv_file_path}' created successfully.")
+        final_outputs = {}
+        # For each speaker's VTT, use translation if detected language is non-Chinese,
+        # otherwise rewrite.
+        for speaker, vtt_file in speaker_vtt_files.items():
+            # Use the detected language from transcriptions
+            detected_lang = transcriptions[speaker].get('detected_language', "unknown")
+            if detected_lang != "zh":
+                final_outputs[speaker] = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
+            else:
+                final_outputs[speaker] = rewrite(vtt_file, output_dir=out_dir)
+        return final_outputs  # Returns a dict mapping speaker -> markdown output
 
-    # Use language detection and process accordingly
-    detected_lang = language_detect(vtt_file)
-    print(f"Detected language: {detected_lang}")
-    if detected_lang == "en":
-        final_output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
+    # Else, use existing single-language processing
     else:
-        final_output = rewrite(vtt_file, output_dir=out_dir)
+        # Define supported extensions
+        video_exts = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v"}
+        audio_exts = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".webm", ".opus"}
+        subtitle_exts = {".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi", ".txt"}
         
-    return final_output  # Return final markdown output
+        # Process based on input type
+        if url:
+            try:
+                file_path = download_audio(url.strip())
+                lang = language if language.strip() else None
+                vtt_file, auto_lang = transcribe(file_path, language=lang)
+            except Exception as e:
+                print(f"Error downloading from URL: {e}")
+                return "Error: Failed to process URL", None, None, None
+        elif file_path:
+            _, ext = os.path.splitext(file_path)
+            ext = ext.lower()
+            if ext in video_exts:
+                audio_file = video_to_audio(file_path)
+                lang = language if language.strip() else None
+                vtt_file, auto_lang = transcribe(audio_file, language=lang)
+            elif ext in audio_exts:
+                lang = language if language.strip() else None
+                wav_file = audio_wav(file_path)
+                vtt_file, auto_lang = transcribe(wav_file, language=lang)
+            elif ext in subtitle_exts:
+                vtt_file = file_path
+                auto_lang = language or "unknown"
+            else:
+                print(f"Warning: Unknown file type {ext}, treating as subtitle file")
+                vtt_file = file_path
+                auto_lang = language or "unknown"
+        
+        # Generate CSV after getting VTT file
+        _, filename = os.path.split(vtt_file)
+        base_name, _ = os.path.splitext(filename)
+        csv_file_path = os.path.join(out_dir, base_name + ".csv")
+        vtt_df = parse_subtitle(vtt_file)
+        vtt_df.to_csv(csv_file_path, index=True, encoding='utf-8', lineterminator='\n')
+        print(f"CSV file '{csv_file_path}' created successfully.")
+
+        # Use language detection and process accordingly
+        detected_lang = language_detect(vtt_file)
+        print(f"Detected language: {detected_lang}")
+        if detected_lang == "en":
+            final_output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
+        else:
+            final_output = rewrite(vtt_file, output_dir=out_dir)
+        
+        return final_output  # Return final markdown output
 
 def create_interface():
     def process_wrapper(file_path, url, language, llm, multi_language, translate_lang):

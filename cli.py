@@ -11,6 +11,7 @@ def main():
     parser.add_argument("input", help="Path to input file or URL")
     parser.add_argument("--language", default="", help="Transcribe Language (optional)")
     parser.add_argument("--llm", default="", help="Large Language Model identifier (optional)")
+    # Store_true automatically sets the flag to True when provided.
     parser.add_argument("--multi-language", action="store_true", default=False, 
                        help="Enable multi-language processing (default: False)")
     parser.add_argument("--translate-lang", default="Chinese", 
@@ -18,6 +19,9 @@ def main():
     parser.add_argument("--output-dir", default="", 
                        help="Output directory (optional)")
     args = parser.parse_args()
+
+    # Debug: print the multi_language flag
+    print(f"Multi-language flag is set to: {args.multi_language}")
 
     # Patch dspy.LM.__init__
     default_model = args.llm.strip() if args.llm.strip() else "ollama/qwen2.5"
