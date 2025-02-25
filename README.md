@@ -1,44 +1,39 @@
-# AI subtitle Editor
+# Wenbi
 
-The final goal of this project is turn the subtitle into a readable written file with slids by using AI, that is Large Language Model (LLM) promts. 
+A simple tool to make the video, audio, subtitle and url content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. 
 
-This is my personal project for [GCDFL](https://www.gcdfl.org/). The lectures will generate the cc.vtt or srt files. However, I want to make these files into readable markdown file for Chinese audience. 
+Initally, this porject is just serving to my website [GCDFL](https://www.gcdfl.org/). We do a service to turn its lectures into a written files for easier further editing. 
 
-## you can try the [demo](https://archive.gcdfl.org/), right now only remove the timestamps and joining the lines. 
+Note: LLM can make mistakes and cannot be fully trusted. LLM can only be used for preliminary processing of data, some elementary work, and in this sense, LLM does greatly improve editing efficiency. 
 
-# Content
 
-### [Features](https://github.com/Areopaguaworkshop/AI-Subtitle-Editor?tab=readme-ov-file#features)
+### you can try the [demo](https://archive.gcdfl.org/), right now only remove the timestamps and joining the lines. 
 
-### [Install](https://github.com/Areopaguaworkshop/AI-Subtitle-Editor?tab=readme-ov-file#install-1)
+## Features
 
-## Features:
+- Accept most popular audio, video, subtitle files and url--mainly using yt-dlp as input. 
 
-- Remove transcript timestamps and joining the lines. [Done] 
+- Editing the files by using LLM to rewriting and translating the content into a readable written markdown files. 
 
-- delete the oral words, such hi, a, ha etc. 
+- Support input with multiple languages.
 
-- delete repeated words, phrase and sentences.
-
-- more. 
+- offer an commandline and gradio GUI with multiple options for further personal setting. 
 
 ## Install
 
 ### prerequest
 - install [rye](https://rye.astral.sh/)
-- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (optional, if you want use the a_w_whisper-cpp.py, recommend for cpu user.)
-- [whisper](https://github.com/openai/whisper) (optional, if you want use the a_w-whisper.py)
 
 ### first step clone this repository
 
 `
-git clone https://github.com/Areopaguaworkshop/AI-Subtitle-Editor.git
+git clone https://github.com/Areopaguaworkshop/wenbi.git
 ` 
 
 ### second step 
 
 ```
-cd AI-Subtitle-Editor
+cd wenbi 
 
 mv pyproject.toml pyproject-bk.toml
 
@@ -52,31 +47,49 @@ rye init
 copy whole content of the pyproject-bk.toml into pyproject.toml
 ` 
 
-Then run 
+Then run
+
+`source .venv/bin/activate` 
+
+`rye pin 3.12` 
 
 `rye sync`
 
 ### four step
 
-`python src/rm_time_join_line.py`
+You can choose commandline or webGUI through gradio.
 
-- if you want local whisper with audio transcribe, you can run 
+- gradio
 
-`python src/a_w-whisper`
+`python main.py`
 
-or 
+Then go to http://localhost:7860. 
 
-`python src/a_w_cpp.py` # you will need to dowload the [whispercpp.bin](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+- commandline 
 
-or, if you have the GROQ_API_KEY, you can first 
+'python cli.py --help'
 
-`export GROQ_API_KEY="put your GROQ_API_KEY here"` 
+usage: cli.py [-h] [--language LANGUAGE] [--llm LLM] [--multi-language] [--translate-lang TRANSLATE_LANG] [--output-dir OUTPUT_DIR] input
 
-then run 
+wenbi: Convert video, audio, url or subtitle files to CSV and written Markdown outputs.
 
-`python src/a_w_groq.py` 
+positional arguments:
+  input                 Path to input file or URL
 
-- Then you can access the from http://localhost:7860. 
+options:
+  -h, --help            show this help message and exit
+  --language LANGUAGE   Transcribe Language (optional)
+  --llm LLM             Large Language Model identifier (optional)
+  --multi-language      Enable multi-language processing (default: False)
+  --translate-lang TRANSLATE_LANG
+                        Target translation language (default: Chinese)
+  --output-dir OUTPUT_DIR
+                        Output directory (optional)
+
+
+
+Note: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you nedd a HUGGINGFACE_TOKEN in you environment. by `export HUGGINGFACE_TOKEN="you HUGGINGFACE_TOKEN here"`. 
+
 
 Enjoy! 
 
@@ -86,8 +99,8 @@ Enjoy!
 AI-Subtitle-Editor is licensed under the Apache License 2.0 found in the [LICENSE](https://github.com/Areopaguaworkshop/AI-Subtitle-Editor/blob/main/license.md) file in the root directory of this repository.
 
 ## Citation:
-```@article{areopagus/AI-Subtitle-Editor,
-  title = {AI-Subtitle-Editor},
+```@article{areopagus/wenbi
+  title = {wenbi},
   author = {Yuan, Yongjia},
   year = {2024},
 }
