@@ -11,9 +11,10 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def process_input(file_path, url="", language="", llm="", multi_language=False, translate_lang="Chinese", output_dir=""):  # Updated function signature
+# Updated process_input to handle both file and URL inputs
+def process_input(file_path=None, url="", language="", llm="", multi_language=False, translate_lang="Chinese", output_dir=""):
     # Use provided output_dir or fallback to constant OUTPUT_DIR
-    out_dir = output_dir if output_dir.strip() else OUTPUT_DIR
+    out_dir = output_dir if output_dir and output_dir.strip() else OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     
     # Patch dspy.LM.__init__ so that its "model" parameter is always a string.
@@ -24,7 +25,7 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
         orig_init(self, *args, **kw)
     dspy.LM.__init__ = new_init
     
-    if not file_path and not url.strip():
+    if not file_path and not url:
         return "Error: No input provided", None, None, None
     
     # Define supported extensions
@@ -33,7 +34,7 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
     subtitle_exts = {".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi", ".txt"}
     
     # Process based on input type
-    if url and url.strip():
+    if url:
         try:
             file_path = download_audio(url.strip())
             lang = language if language.strip() else None
@@ -44,7 +45,6 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
     elif file_path:
         _, ext = os.path.splitext(file_path)
         ext = ext.lower()
-        
         if ext in video_exts:
             audio_file = video_to_audio(file_path)
             lang = language if language.strip() else None
@@ -60,15 +60,13 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
             print(f"Warning: Unknown file type {ext}, treating as subtitle file")
             vtt_file = file_path
             auto_lang = language or "unknown"
-    else:
-        return "Error: Invalid input", None, None, None
         
     # Generate CSV after getting VTT file
     _, filename = os.path.split(vtt_file)
     base_name, _ = os.path.splitext(filename)
     csv_file_path = os.path.join(out_dir, base_name + ".csv")
     vtt_df = parse_subtitle(vtt_file)
-    vtt_df.to_csv(csv_file_path, index=True, encoding='utf-8')
+    vtt_df.to_csv(csv_file_path, index=True, encoding='utf-8', line_terminator='\n')
     print(f"CSV file '{csv_file_path}' created successfully.")
 
     # Use language detection and process accordingly
@@ -76,7 +74,7 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
     print(f"Detected language: {detected_lang}")
     if detected_lang == "en":
         final_output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
-    else:  # zh or unknown
+    else:
         final_output = rewrite(vtt_file, output_dir=out_dir)
         
     return final_output  # Return final markdown output
@@ -84,7 +82,7 @@ def process_input(file_path, url="", language="", llm="", multi_language=False, 
 def create_interface():
     def process_wrapper(file_path, url, language, llm, multi_language, translate_lang):
         multi_lang_bool = multi_language == "True"
-        return process_input(file_path, url, language, llm, multi_lang_bool, translate_lang)
+        return process_input(file_path, language, llm, multi_lang_bool, translate_lang)
 
     iface = gr.Interface(
         fn=process_wrapper,

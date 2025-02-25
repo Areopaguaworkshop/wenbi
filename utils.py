@@ -248,53 +248,71 @@ def language_detect(file_path):
     """
     Detects the language of a text file using fastText.
     Handles different encodings and binary files gracefully.
-    Includes common Chinese encodings.
-
-    Args:
-        file_path (str): Path to the text file.
-
-    Returns:
-        str: Detected language code (e.g., "en" or "zh").
     """
-    model = fasttext.load_model("model/lid.176.bin")
-
-    # Try different encodings, including Chinese-specific ones
-    encodings = [
-        "utf-8",
-        "utf-16",
-        "utf-32",
-        "gb2312",  # Simplified Chinese
-        "gbk",  # Chinese unified
-        "gb18030",  # Chinese national standard
-        "big5",  # Traditional Chinese
-        "big5hkscs",  # Hong Kong variant
-        "ascii",
-        "iso-8859-1",
-        "cp1252",
-    ]
-    text = None
-
-    for encoding in encodings:
-        try:
-            with open(file_path, "r", encoding=encoding) as f:
-                text = f.read()
-            break  # if successful, exit the loop
-        except (UnicodeDecodeError, LookupError):
-            continue
-
-    if text is None:
-        print(f"Warning: Could not decode file {
-              file_path} - defaulting to 'zh'")
-        return "zh"
-
     try:
+        # First try to find the model in the same directory as the script
+        model_path = os.path.join(os.path.dirname(__file__), "./model/lid.176.bin")
+        if not os.path.exists(model_path):
+            print(f"Warning: Language detection model not found at {model_path}")
+            print("Please download it from https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin")
+            print("Attempting to detect language from content patterns...")
+            # Fallback to basic pattern detection
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in content):
+                return "zh"  # Contains Chinese characters
+            return "en"  # Default to English if no Chinese characters found
+        
+        model = fasttext.load_model(model_path)
+        
+        # Extended list of encodings with Chinese support
+        encodings = [
+            'utf-8',
+            'utf-8-sig',
+            'utf-16',
+            'utf-32',
+            'gb2312',      # Simplified Chinese
+            'gbk',         # Chinese National Standard
+            'gb18030',     # Unified Chinese
+            'big5',        # Traditional Chinese (Taiwan/Hong Kong)
+            'big5hkscs',   # Hong Kong variant
+            'cp936',       # Windows Chinese
+            'hz',          # Chinese HZ encoding
+            'iso2022_jp',  # Japanese (some Chinese characters)
+            'ascii',
+            'iso-8859-1'
+        ]
+        
+        text = None
+        successful_encoding = None
+        
+        for encoding in encodings:
+            try:
+                with open(file_path, 'r', encoding=encoding) as f:
+                    text = f.read()
+                successful_encoding = encoding
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+        
+        if text is None:
+            raise ValueError(f"Could not decode file with any of {len(encodings)} supported encodings")
+            
+        print(f"Successfully read file using {successful_encoding} encoding")
         labels, _ = model.predict(text, k=1)
-        lang = labels[0].replace("__label__", "")
-        return lang
+        return labels[0].replace("__label__", "")
+        
     except Exception as e:
-        print(
-            f"Warning: Language detection failed - {str(e)} - defaulting to 'zh'")
-        return "zh"
+        print(f"Language detection error: {str(e)}")
+        print("Defaulting to simple character-based detection...")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in content):
+                return "zh"
+        except:
+            pass
+        return "en"
 
 
 def audio_wav(audio_path, output_dir=None):
