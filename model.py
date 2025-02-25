@@ -1,5 +1,6 @@
 import dspy
 import os
+import spacy  # Add this import
 from utils import segment
 
 # following functions associated with the models, 
@@ -55,34 +56,23 @@ def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
 
 
 def rewrite(file_path, output_dir=None):
-    """Rewrites text by first segmenting the file into paragraphs,
-    then rewriting each paragraph one at a time. This is the Chinese rewrite function.
-    
-    Args:
-        file_path (str): Path to the text file (typically a VTT file).
-        output_dir (str, optional): Directory to save the rewritten markdown file.
-        
-    Returns:
-        str: Path to the generated markdown file if output_dir is provided, otherwise the rewritten text.
-    """
-    from utils import segment  # ensure segment is available
-    # Get segmented text (paragraphs separated by double newlines)
+    """Rewrites text by first segmenting the file into paragraphs."""
+    from utils import segment
     segmented_text = segment(file_path)
     paragraphs = segmented_text.split("\n\n")
     
-    # Set up spacy model (using English or Chinese model as needed; here we assume "en")
-    language = "en"
-    if language == "zh":
-        import spacy
-        nlp = spacy.load("zh_core_web_sm")
-    elif language == "en":
-        import spacy
-        nlp = spacy.load("en_core_web_sm")
-    else:
-        raise ValueError("Invalid language. Supported languages are 'zh' and 'en'.")
-    
+    # Use basic language support without loading models
+    try:
+        if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in segmented_text):
+            nlp = spacy.blank("zh")
+        else:
+            nlp = spacy.blank("en")
+    except Exception as e:
+        print(f"Error creating language processor: {e}")
+        print("Falling back to basic English")
+        nlp = spacy.blank("en")
+
     # Configure the LM without hard-coding the model parameter (this will be patched externally)
-    import dspy
     lm = dspy.LM(
         base_url="http://localhost:11434",
         max_tokens=50000,

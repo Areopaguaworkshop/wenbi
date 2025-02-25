@@ -1,15 +1,15 @@
 import os
 import whisper
-import spacy
 import re
 import pandas as pd
-from spacy.lang.zh import Chinese  # Import the Chinese language model
-from spacy.lang.en import English  # Import the English language model
 from moviepy.video.io.VideoFileClip import VideoFileClip  # Changed import
 
 # Use AudioFileClip for audio conversion
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 import fasttext  # new import for language detection
+from spacy.lang.zh import Chinese  # Add this import
+from spacy.lang.en import English  # Add this import
+import spacy  # Add this import
 
 # the following functions are used in the main.py file,
 # most of them are convertors, from ulr, video and audio and subtitle
@@ -21,7 +21,6 @@ def parse_subtitle(file_path, vtt_file=None):
     Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame.
     If vtt_file is provided, it will be used directly as the content.
     """
-    import pandas as pd
     if vtt_file is None:
         try:
             with open(file_path, "r", encoding="utf-8-sig", errors="replace") as file:
@@ -90,13 +89,15 @@ def rm_rep(file_path):
         return f"An error occurred: {e}"
 
 
-def transcribe(file_path, language=None):
+def transcribe(file_path, language=None, output_dir=None):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
+    Now accepts an optional output_dir where the VTT file will be saved.
 
     Args:
         file_path (str): Path to the audio file
-        language (str, optional): Language code for transcription. If not provided, auto-detection is used.
+        language (str, optional): Language code for transcription.
+        output_dir (str, optional): Directory to save the VTT file. Defaults to current directory.
 
     Returns:
         tuple: (Path to the generated VTT file, auto-detected language)
@@ -108,8 +109,7 @@ def transcribe(file_path, language=None):
     result = model.transcribe(
         file_path, fp16=False, verbose=True, language=language if language else None
     )
-    detected_language = result.get(
-        "language", language if language else "unknown")
+    detected_language = result.get("language", language if language else "unknown")
 
     # Create VTT content with proper timestamps
     vtt_content = ["WEBVTT\n"]
@@ -127,7 +127,13 @@ def transcribe(file_path, language=None):
         text = segment["text"].strip()
         vtt_content.append(f"\n{start_time} --> {end_time}\n{text}")
 
-    out_file = os.path.abspath(base + ".vtt")
+    # Use provided output_dir or default to the base file's directory
+    if output_dir is None:
+        output_dir = os.path.dirname(os.path.abspath(file_path))
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    out_file = os.path.join(output_dir, base_name + ".vtt")
     with open(out_file, "w", encoding="utf-8") as f:
         f.write("".join(vtt_content))
 
@@ -147,14 +153,16 @@ def segment(file_path, sentence_count=8):
     """
     text = rm_rep(file_path)  # Integrate rm_rep here
 
-    # Detect language
+    # Directly use basic language classes
     if any(char in text for char in "，。？！"):
-        nlp = Chinese()
+        nlp = Chinese()  # Use basic Chinese
     else:
-        nlp = English()
+        nlp = English()  # Use basic English
 
     # Add the sentencizer component to the pipeline
-    nlp.add_pipe("sentencizer")
+    if "sentencizer" not in nlp.pipe_names:
+        nlp.add_pipe("sentencizer")
+        
     doc = nlp(text)
 
     paragraphs = []
@@ -173,9 +181,6 @@ def segment(file_path, sentence_count=8):
 
     segmented_text = "\n\n".join(paragraphs)
     return segmented_text
-
-
-# New functions added (moved from model.py):
 
 
 def download_audio(url, output_dir=None):

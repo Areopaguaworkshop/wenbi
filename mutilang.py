@@ -1,7 +1,5 @@
-import torch
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
-import numpy as np
 import whisper
 import os
 
@@ -30,7 +28,10 @@ def separate_speakers(audio_path, auth_token=None):
     # Initialize speaker diarization pipeline
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
-        use_auth_token=auth_token
+        use_auth_token=auth_token,
+        min_duration=0.5,
+        sad={"min_duration_on": 0.5, "min_duration_off":
+        0.5},
     )
     
     # Run diarization
@@ -106,22 +107,22 @@ def transcribe_multi_speaker(audio_path, language_hints=None):
     model = whisper.load_model("large-v3-turbo")
     transcriptions = {}
     
-    for speaker, speaker_path in speaker_files.items():
-        # Get language hint for this speaker if provided
-        language = language_hints.get(speaker) if language_hints else None
-        
-        # Transcribe with language hint
+    for spk, speaker_path in extract_speaker_segments(audio_path, separate_speakers(audio_path, os.getenv("HUGGINGFACE_TOKEN"))).items():
+        lang_hint = language_hints.get(spk) if language_hints else None
         result = model.transcribe(
             speaker_path,
-            language=language,
+            language=lang_hint,
             fp16=False,
             verbose=True
         )
-        
-        transcriptions[speaker] = {
-            'detected_language': result['language'],
-            'segments': result['segments']
-        }
+        lang = result['language']
+        if lang in transcriptions:
+            transcriptions[lang]['segments'].extend(result['segments'])
+        else:
+            transcriptions[lang] = {
+                'detected_language': lang,
+                'segments': result['segments']
+            }
     
     return transcriptions
 
@@ -158,56 +159,33 @@ def speaker_vtt(transcriptions, output_dir=None, base_filename=""):
     Create separate VTT files for each speaker from the multi-speaker transcriptions.
     
     Args:
-        transcriptions (dict): Mapping of speaker IDs to their transcription data.
+        transcriptions (dict): Mapping of speaker IDs (or languages) to their transcription data.
         output_dir (str, optional): Directory in which to save the VTT files. Defaults to current directory.
-        base_filename (str, optional): Base filename to prepend. If empty, speaker IDs are used as filenames.
+        base_filename (str, optional): Base filename to prepend.
         
     Returns:
-        dict: Mapping of speaker IDs to their generated VTT file paths.
+        dict: Mapping of speaker IDs (or languages) to their generated VTT file paths.
     """
     if output_dir is None:
         output_dir = os.getcwd()
-    speaker_files = {}
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+    vtt_files = {}
     
-    for speaker, data in transcriptions.items():
+    for lang, data in transcriptions.items():
         vtt_lines = ["WEBVTT\n"]
-        language = data.get('detected_language', 'unknown')
         for segment in data['segments']:
             start = format_timestamp(segment['start'])
             end = format_timestamp(segment['end'])
             text = segment['text'].strip()
             vtt_lines.append(f"\n{start} --> {end}")
-            vtt_lines.append(f"[{speaker} - {language}]")
+            vtt_lines.append(f"[{lang}]")
             vtt_lines.append(f"{text}\n")
         vtt_content = "\n".join(vtt_lines)
-        filename = f"{base_filename}_{speaker}.vtt" if base_filename else f"{speaker}.vtt"
+        filename = f"{base_filename}_{lang}.vtt" if base_filename else f"{lang}.vtt"
         filepath = os.path.join(output_dir, filename)
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(vtt_content)
-        speaker_files[speaker] = filepath
+        vtt_files[lang] = filepath
         
-    return speaker_files
-
-if __name__ == "__main__":
-    # Example usage
-    audio_file = "path/to/your/audio.wav"
-    
-    # Optional: Provide language hints for speakers
-    language_hints = {
-        "SPEAKER_00": "en",
-        "SPEAKER_01": "zh"
-    }
-    
-    try:
-        transcriptions = transcribe_multi_speaker(audio_file, language_hints)
-        vtt_content = format_transcription(transcriptions)
-        
-        # Save VTT file
-        output_path = os.path.splitext(audio_file)[0] + "_multi.vtt"
-        with open(output_path, "w", encoding="utf-8") as f:
-            f.write(vtt_content)
-            
-        print(f"Transcription saved to: {output_path}")
-        
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    return vtt_files
