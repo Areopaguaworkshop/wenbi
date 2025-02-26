@@ -1,6 +1,6 @@
 # Wenbi
 
-A simple tool to make the video, audio, subtitle and url content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. 
+A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. 
 
 Initally, this porject is just serving to my website [GCDFL](https://www.gcdfl.org/). We do a service to turn its lectures into a written files for easier further editing. 
 
@@ -17,7 +17,7 @@ Note: LLM can make mistakes and cannot be fully trusted. LLM can only be used fo
 
 - Support input with multiple languages.
 
-- offer an commandline and gradio GUI with multiple options for further personal setting. 
+- offer an commandline and gradio GUI with multiple options for further personal setting
 
 ## Install
 

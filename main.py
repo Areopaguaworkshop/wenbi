@@ -12,26 +12,17 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Updated process_input to handle both file and URL inputs
-def process_input(file_path=None, url="", language="", llm="", multi_language=False, translate_lang="Chinese", output_dir=""):
+def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="", multi_language=False, translate_lang="Chinese", output_dir=""):
     # Use provided output_dir or fallback to constant OUTPUT_DIR
     out_dir = output_dir if output_dir and output_dir.strip() else OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     
-    # Patch dspy.LM.__init__ so that its "model" parameter is always a string.
-    default_model = llm.strip() if llm.strip() else "ollama/qwen2.5"
-    orig_init = dspy.LM.__init__
-    def new_init(self, *args, **kw):
-        kw["model"] = str(default_model)
-        orig_init(self, *args, **kw)
-    dspy.LM.__init__ = new_init
-    
     if not file_path and not url:
         return "Error: No input provided", None, None, None
     
-    # If multi_language is True, use muti-lang.py functions.
+    # Process multi-language branch
     if multi_language:
         from mutilang import transcribe_multi_speaker, speaker_vtt
-        # Assume file_path is an audio file already (if url, handle as usual)
         if url:
             try:
                 file_path = download_audio(url.strip())
@@ -39,24 +30,33 @@ def process_input(file_path=None, url="", language="", llm="", multi_language=Fa
                 print(f"Error downloading from URL: {e}")
                 return "Error: Failed to process URL", None, None, None
         base_name = os.path.splitext(os.path.basename(file_path))[0]
-        # Get multi-speaker transcriptions
         transcriptions = transcribe_multi_speaker(file_path)
-        # Generate separate VTT files per speaker
         speaker_vtt_files = speaker_vtt(transcriptions, output_dir=out_dir, base_filename=base_name)
         
         final_outputs = {}
-        # For each speaker's VTT, use translation if detected language is non-Chinese,
-        # otherwise rewrite.
         for speaker, vtt_file in speaker_vtt_files.items():
-            # Use the detected language from transcriptions
             detected_lang = transcriptions[speaker].get('detected_language', "unknown")
             if detected_lang != "zh":
-                final_outputs[speaker] = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
+                # Translation branch: use provided translate_llm.
+                default_model = translate_llm.strip() if translate_llm.strip() else "ollama/qwen2.5"
+                orig_init = dspy.LM.__init__
+                def new_init(self, *args, **kw):
+                    kw["model"] = str(default_model)
+                    orig_init(self, *args, **kw)
+                dspy.LM.__init__ = new_init
+                final_outputs[speaker] = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang, llm=default_model)
             else:
+                # Rewriting branch: use provided rewrite_llm.
+                default_model = rewrite_llm.strip() if rewrite_llm.strip() else "ollama/qwen2.5"
+                orig_init = dspy.LM.__init__
+                def new_init(self, *args, **kw):
+                    kw["model"] = str(default_model)
+                    orig_init(self, *args, **kw)
+                dspy.LM.__init__ = new_init
                 final_outputs[speaker] = rewrite(vtt_file, output_dir=out_dir)
-        return final_outputs  # Returns a dict mapping speaker -> markdown output
-
-    # Else, use existing single-language processing
+        return final_outputs
+    
+    # Single language processing
     else:
         # Define supported extensions
         video_exts = {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v"}
@@ -103,47 +103,39 @@ def process_input(file_path=None, url="", language="", llm="", multi_language=Fa
         detected_lang = language_detect(vtt_file)
         print(f"Detected language: {detected_lang}")
         if detected_lang == "en":
-            final_output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang)
+            default_model = translate_llm.strip() if translate_llm.strip() else "ollama/qwen2.5"
+            orig_init = dspy.LM.__init__
+            def new_init(self, *args, **kw):
+                kw["model"] = str(default_model)
+                orig_init(self, *args, **kw)
+            dspy.LM.__init__ = new_init
+            final_output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang, llm=default_model)
         else:
+            default_model = rewrite_llm.strip() if rewrite_llm.strip() else "ollama/qwen2.5"
+            orig_init = dspy.LM.__init__
+            def new_init(self, *args, **kw):
+                kw["model"] = str(default_model)
+                orig_init(self, *args, **kw)
+            dspy.LM.__init__ = new_init
             final_output = rewrite(vtt_file, output_dir=out_dir)
         
         return final_output  # Return final markdown output
 
 def create_interface():
-    def process_wrapper(file_path, url, language, llm, multi_language, translate_lang):
+    # Updated textbox label for rewrite LLM model.
+    def process_wrapper(file_path, url, language, rewrite_llm, translate_llm, multi_language, translate_lang):
         multi_lang_bool = multi_language == "True"
-        return process_input(file_path, language, llm, multi_lang_bool, translate_lang)
-
+        return process_input(file_path, url, language, rewrite_llm, translate_llm, multi_lang_bool, translate_lang)
     iface = gr.Interface(
         fn=process_wrapper,
         inputs=[
             gr.File(label="Upload File", type="filepath"),
-            gr.Textbox(
-                label="Or Enter URL (YouTube, etc)",
-                value="",
-                placeholder="https://youtube.com/watch?v=..."
-            ),
-            gr.Textbox(
-                label="Transcribe Language (optional)",
-                value="",
-                placeholder="e.g., Chinese, English",
-            ),
-            gr.Textbox(
-                label="LLM Model (optional)",
-                value="ollama/qwen2.5",
-                placeholder="Enter LLM model identifier"
-            ),
-            gr.Dropdown(
-                label="Multi-language Processing",
-                choices=["False", "True"],
-                value="False",
-                type="value"
-            ),
-            gr.Textbox(
-                label="Translation Language (optional)",
-                value="Chinese",
-                placeholder="Enter target translation language"
-            ),
+            gr.Textbox(label="Or Enter URL (YouTube, etc)", value="", placeholder="https://youtube.com/watch?v=..."),
+            gr.Textbox(label="Transcribe Language (optional)", value="", placeholder="e.g., Chinese, English"),
+            gr.Textbox(label="Rewrite LLM Model (optional)", value="ollama/qwen2.5", placeholder="Enter rewrite LLM model identifier"),
+            gr.Textbox(label="Translation LLM Model (optional)", value="ollama/qwen2.5", placeholder="Enter translation LLM model identifier"),
+            gr.Dropdown(label="Multi-language Processing", choices=["False", "True"], value="False", type="value"),
+            gr.Textbox(label="Translation Language (optional)", value="Chinese", placeholder="Enter target translation language"),
         ],
         outputs=[
             gr.Textbox(label="Final Rewritten Output"),

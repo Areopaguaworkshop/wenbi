@@ -31,20 +31,22 @@ def parse_subtitle(file_path, vtt_file=None):
             print("pysrt library not found. Falling back to less robust parsing.")
     else:
         lines = vtt_file.splitlines()
-        
+
     timestamps = []
     contents = []
     current_content = []
-    if file_path.lower().endswith(".txt") or (vtt_file is not None and file_path.lower().endswith(".txt")):
+    if file_path.lower().endswith(".txt") or (
+        vtt_file is not None and file_path.lower().endswith(".txt")
+    ):
         contents = lines
         timestamps = [""] * len(contents)
     else:
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            # Improved .sub handling:
+            # Added pattern to support timestamps like "00:00:51.160 --> 00:01:00.700"
             if "-->" in line or re.match(
-                r"\d{2}:\d{2}:\d{2},\d{2} --> \d{2}:\d{2}:\d{2},\d{2}", line
+                r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}", line
             ):
                 timestamps.append(line)
                 i += 1
@@ -53,7 +55,7 @@ def parse_subtitle(file_path, vtt_file=None):
                     i < len(lines)
                     and lines[i].strip()
                     and not re.match(
-                        r"\d{2}:\d{2}:\d{2},\d{2} --> \d{2}:\d{2}:\d{2},\d{2}",
+                        r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}",
                         lines[i].strip(),
                     )
                 ):
@@ -82,7 +84,7 @@ def rm_rep(file_path):
     """Removes repeated words/phrases from a file."""
     try:
         vtt_df = parse_subtitle(file_path)
-        all_content = "".join(vtt_df["Content"])
+        all_content = " ".join(vtt_df["Content"])
         pattern = r"(([\u4e00-\u9fa5A-Za-z，。！？；：“”（）【】《》、]{1,5}))(\s?\1)+"
         return re.sub(pattern, r"\1", all_content)
     except Exception as e:
@@ -162,7 +164,7 @@ def segment(file_path, sentence_count=8):
     # Add the sentencizer component to the pipeline
     if "sentencizer" not in nlp.pipe_names:
         nlp.add_pipe("sentencizer")
-        
+
     doc = nlp(text)
 
     paragraphs = []
@@ -172,12 +174,12 @@ def segment(file_path, sentence_count=8):
         current_paragraph.append(sent.text)
         current_count += 1
         if current_count >= sentence_count:
-            paragraphs.append("".join(current_paragraph))
+            paragraphs.append(" ".join(current_paragraph))
             current_paragraph = []
             current_count = 0
 
     if current_paragraph:
-        paragraphs.append("".join(current_paragraph))
+        paragraphs.append(" ".join(current_paragraph))
 
     segmented_text = "\n\n".join(paragraphs)
     return segmented_text
@@ -259,61 +261,67 @@ def language_detect(file_path):
         model_path = os.path.join(os.path.dirname(__file__), "./model/lid.176.bin")
         if not os.path.exists(model_path):
             print(f"Warning: Language detection model not found at {model_path}")
-            print("Please download it from https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin")
+            print(
+                "Please download it from https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin"
+            )
             print("Attempting to detect language from content patterns...")
             # Fallback to basic pattern detection
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in content):
+            if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in content):
                 return "zh"  # Contains Chinese characters
             return "en"  # Default to English if no Chinese characters found
-        
+
         model = fasttext.load_model(model_path)
-        
+
         # Extended list of encodings with Chinese support
         encodings = [
-            'utf-8',
-            'utf-8-sig',
-            'utf-16',
-            'utf-32',
-            'gb2312',      # Simplified Chinese
-            'gbk',         # Chinese National Standard
-            'gb18030',     # Unified Chinese
-            'big5',        # Traditional Chinese (Taiwan/Hong Kong)
-            'big5hkscs',   # Hong Kong variant
-            'cp936',       # Windows Chinese
-            'hz',          # Chinese HZ encoding
-            'iso2022_jp',  # Japanese (some Chinese characters)
-            'ascii',
-            'iso-8859-1'
+            "utf-8",
+            "utf-8-sig",
+            "utf-16",
+            "utf-32",
+            "gb2312",  # Simplified Chinese
+            "gbk",  # Chinese National Standard
+            "gb18030",  # Unified Chinese
+            "big5",  # Traditional Chinese (Taiwan/Hong Kong)
+            "big5hkscs",  # Hong Kong variant
+            "cp936",  # Windows Chinese
+            "hz",  # Chinese HZ encoding
+            "iso2022_jp",  # Japanese (some Chinese characters)
+            "ascii",
+            "iso-8859-1",
         ]
-        
+
         text = None
         successful_encoding = None
-        
+
         for encoding in encodings:
             try:
-                with open(file_path, 'r', encoding=encoding) as f:
+                with open(file_path, "r", encoding=encoding) as f:
                     text = f.read()
                 successful_encoding = encoding
                 break
             except (UnicodeDecodeError, LookupError):
                 continue
-        
+
         if text is None:
-            raise ValueError(f"Could not decode file with any of {len(encodings)} supported encodings")
-            
+            raise ValueError(
+                f"Could not decode file with any of {
+                    len(encodings)
+                } supported encodings"
+            )
+
         print(f"Successfully read file using {successful_encoding} encoding")
         labels, _ = model.predict(text, k=1)
         return labels[0].replace("__label__", "")
-        
+
     except Exception as e:
         print(f"Language detection error: {str(e)}")
         print("Defaulting to simple character-based detection...")
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in content):
+            if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in content):
                 return "zh"
         except:
             pass
@@ -343,8 +351,7 @@ def audio_wav(audio_path, output_dir=None):
 
     try:
         audio_clip = AudioFileClip(audio_path)
-        audio_clip.write_audiofile(
-            wav_path, codec="pcm_s16le")  # PCM format for WAV
+        audio_clip.write_audiofile(wav_path, codec="pcm_s16le")  # PCM format for WAV
         audio_clip.close()
         return wav_path
     except Exception as e:
