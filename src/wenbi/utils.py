@@ -257,8 +257,8 @@ def language_detect(file_path):
     Handles different encodings and binary files gracefully.
     """
     try:
-        # First try to find the model in the same directory as the script
-        model_path = os.path.join(os.path.dirname(__file__), "./model/lid.176.bin")
+        # Use the FastText model from the user cache (~/.fasttext/lid.176.bin)
+        model_path = os.path.join(os.path.expanduser("~"), ".fasttext", "lid.176.bin")
         if not os.path.exists(model_path):
             print(f"Warning: Language detection model not found at {model_path}")
             print(

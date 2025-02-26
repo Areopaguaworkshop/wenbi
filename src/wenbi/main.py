@@ -1,5 +1,6 @@
-from wenbi.utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio  # updated imports
-from wenbi.model import rewrite, translate  # import both rewriting functions
+from wenbi.download import download_all  # Import download helper
+from wenbi.utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio
+from wenbi.model import rewrite, translate
 import os
 import gradio as gr
 import sys
@@ -10,6 +11,9 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Download required models before processing
+download_all()
 
 # Updated process_input to handle both file and URL inputs
 def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="", multi_language=False, translate_lang="Chinese", output_dir=""):

@@ -3,9 +3,13 @@ import argparse
 import os
 import sys
 import subprocess
+from wenbi.download import download_all  # Import the download helper
 from wenbi.main import process_input
 
 def main():
+    # Run download_all() to ensure necessary models are present
+    download_all()
+    
     parser = argparse.ArgumentParser(
         description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs."
     )
