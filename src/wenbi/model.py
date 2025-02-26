@@ -1,7 +1,7 @@
 import dspy
 import os
 import spacy  # Add this import
-from utils import segment
+from wenbi.utils import segment
 
 # following functions associated with the models, 
 # for a better performance, we set a --llm option in both command line
@@ -57,7 +57,7 @@ def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
 
 def rewrite(file_path, output_dir=None):
     """Rewrites text by first segmenting the file into paragraphs."""
-    from utils import segment
+    from wenbi.utils import segment
     segmented_text = segment(file_path)
     paragraphs = segmented_text.split("\n\n")
     

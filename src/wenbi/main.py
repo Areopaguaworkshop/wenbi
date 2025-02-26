@@ -1,5 +1,5 @@
-from utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio  # updated imports
-from model import rewrite, translate  # import both rewriting functions
+from wenbi.utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio  # updated imports
+from wenbi.model import rewrite, translate  # import both rewriting functions
 import os
 import gradio as gr
 import sys
@@ -22,7 +22,7 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
     
     # Process multi-language branch
     if multi_language:
-        from mutilang import transcribe_multi_speaker, speaker_vtt
+        from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
         if url:
             try:
                 file_path = download_audio(url.strip())

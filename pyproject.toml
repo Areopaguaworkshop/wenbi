@@ -1,8 +1,9 @@
 [project]
 name = "wenbi"
-version = "0.1.0"
-description = "Add your description here"
-authors = [{ name = "ajia", email = "yyjfwoaini@gmail.com" }]
+version = "0.13.0"
+description = "A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. "
+license = "Apache-2.0"
+authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
 dependencies = [
     "openai-whisper>=20240930",
     "gradio>=5.18.0",
@@ -17,10 +18,13 @@ dependencies = [
     "pip>=25.0.1",
 ]
 readme = "README.md"
-requires-python = ">= 3.12"
+requires-python = ">= 3.9"
+
+[project.scripts]
+wenbi = "wenbi.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.26.3", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.rye]
