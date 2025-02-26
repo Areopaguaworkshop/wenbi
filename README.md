@@ -11,17 +11,36 @@ Note: LLM can make mistakes and cannot be fully trusted. LLM can only be used fo
 
 ## Features
 
-- Accept most popular audio, video, subtitle files and url--mainly using yt-dlp as input. 
+- :100: Accept most popular audio, video, subtitle files and url--mainly using yt-dlp as input. 
 
-- Editing the files by using LLM to rewriting and translating the content into a readable written markdown files. 
+- :100: Editing the files by using LLM to rewriting and translating the content into a readable written markdown files. 
 
-- Support input with multiple languages.
+- :100: Support input with multiple languages.
 
-- offer an commandline and gradio GUI with multiple options for further personal setting
+- :100: offer an commandline and gradio GUI with multiple options for further personal settings 
+
+- :x: Right now are only support Ollama models, working on other models in OpenAi, Google and others. 
+
+
+## Cons
+
+- This project right now is main server to the language English, Chinese, Japanese. For other languages, trying to use a different Ollama models. 
 
 ## Install
 
 ### prerequest
+- Install [Ollama](https://ollama.com/) and dowload a model. The default model for this project is qwen2.5. 
+
+### method one 
+
+pip install wenbi
+
+:notice: you may nedd install llvmlite and numba first, then install wenbi. Of course, you need install on a virtue environment.
+
+After install, you can simply using wenbi commandline. 
+
+### method two from source
+
 - install [rye](https://rye.astral.sh/)
 
 ### first step clone this repository
