@@ -22,6 +22,11 @@ def main():
     parser.add_argument("--rewrite-lang", default="Chinese", help="Target language for rewriting (default: Chinese)")
     parser.add_argument("--multi-language", action="store_true", help="Enable multi-language processing")
     parser.add_argument("--chunk-length", type=int, default=8, help="the chunk of Number of sentences per paragraph for llm to tranlsate or rewrite. (default: 8)")
+    # Add new LLM configuration options
+    parser.add_argument("--max-tokens", type=int, default=50000, help="Maximum tokens for LLM output (default: 50000)")
+    parser.add_argument("--timeout", type=int, default=3600, help="LLM request timeout in seconds (default: 3600)")
+    parser.add_argument("--temperature", type=float, default=0.1, help="LLM temperature parameter (default: 0.1)")
+    parser.add_argument("--base-url", default="http://localhost:11434", help="Base URL for LLM API (default: http://localhost:11434)")
     args = parser.parse_args()
 
     # If --gui is specified, run main.py to launch the GUI
@@ -48,7 +53,11 @@ def main():
         args.translate_lang,
         args.output_dir,
         args.rewrite_lang,  # Add rewrite_lang parameter
-        args.chunk_length  # Add chunk_length parameter
+        args.chunk_length,  # Add chunk_length parameter
+        max_tokens=args.max_tokens,
+        timeout=args.timeout,
+        temperature=args.temperature,
+        base_url=args.base_url  # Add base_url parameter
     )
     print("Markdown Output:", result[0])
     print("Markdown File:", result[1])

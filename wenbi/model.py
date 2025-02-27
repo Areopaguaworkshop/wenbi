@@ -2,12 +2,21 @@ import dspy
 import os
 from wenbi.utils import segment
 
-# following functions associated with the models,
-# for a better performance, we set a --llm option in both command line
-# and gradio interface to allow users to specify the model they want to use.
+def is_ollama(model_string):
+    """
+    Check the model_string (if provided) for the provider.
+    If the model string starts with "ollama/", return "http://localhost:11434".
+    If model_string is empty, default to "ollama/qwen2.5" with base_url "http://localhost:11434".
+    Otherwise, return None.
+    """
+    if not model_string:
+        return "http://localhost:11434"  # default for empty input
+    parts = model_string.strip().split("/")
+    if parts and parts[0].lower() == "ollama":
+        return "http://localhost:11434"
+    return None
 
-
-def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", chunk_length=8):
+def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", chunk_length=8, max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
     """
     Translate English VTT content to a bilingual markdown file using the target language provided.
 
@@ -17,6 +26,10 @@ def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", c
         translate_language (str): Target language for translation
         llm (str): LLM model identifier
         chunk_length (int): Number of sentences per chunk for segmentation
+        max_tokens (int): Maximum number of tokens for the LLM
+        timeout (int): Timeout for the LLM in seconds
+        temperature (float): Temperature for the LLM
+        base_url (str): Base URL for the LLM
 
     Returns:
         str: Path to the generated markdown file
@@ -24,13 +37,17 @@ def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", c
     segmented_text = segment(vtt_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
 
-    # Use provided LLM model or default to "ollama/qwen2.5"
+    # Determine final base_url based on model string if user provided an llm option.
     model_id = llm if llm else "ollama/qwen2.5"
+    checked_url = is_ollama(model_id)
+    final_base_url = checked_url if checked_url is not None else None
+
     lm = dspy.LM(
-        base_url="http://localhost:11434",
+        base_url=final_base_url,
         model=model_id,
-        max_tokens=50000,
-        temperature=0.1,
+        max_tokens=max_tokens,
+        timeout_s=timeout,
+        temperature=temperature,
     )
     dspy.configure(lm=lm)
 
@@ -60,7 +77,7 @@ def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", c
     return output_file
 
 
-def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_length=8):
+def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_length=8, max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
     """
     Rewrites text by first segmenting the file into paragraphs.
 
@@ -70,18 +87,24 @@ def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_le
         llm (str): LLM model identifier
         rewrite_lang (str): Target language for rewriting (default: Chinese)
         chunk_length (int): Number of sentences per chunk for segmentation
+        max_tokens (int): Maximum number of tokens for the LLM
+        timeout (int): Timeout for the LLM in seconds
+        temperature (float): Temperature for the LLM
+        base_url (str): Base URL for the LLM
     """
     segmented_text = segment(file_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
 
-    # Configure the LM without hard-coding the model parameter (this will be patched externally)
     model_id = llm if llm else "ollama/qwen2.5"
+    checked_url = is_ollama(model_id)
+    final_base_url = checked_url if checked_url is not None else None
+
     lm = dspy.LM(
+        base_url=final_base_url,
         model=model_id,
-        base_url="http://localhost:11434",
-        max_tokens=50000,
-        timeout_s=3600,
-        temperature=0.1,
+        max_tokens=max_tokens,
+        timeout_s=timeout,
+        temperature=temperature,
     )
     dspy.configure(lm=lm)
 

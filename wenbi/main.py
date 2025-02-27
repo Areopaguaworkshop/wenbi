@@ -53,7 +53,8 @@ def wav_vtt(wav_file, language, out_dir, multi_language):
 
 def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="",
                   multi_language=False, translate_lang="Chinese", output_dir="", 
-                  rewrite_lang="Chinese", chunk_length=8):
+                  rewrite_lang="Chinese", chunk_length=8, max_tokens=50000, 
+                  timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
     out_dir = output_dir if output_dir and output_dir.strip() else OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     
@@ -96,12 +97,16 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
             if detected_lang.lower() in ["zh", "chinese", "zh-cn", "zh-tw"]:
                 output = rewrite(vtt_file, output_dir=out_dir, 
                                llm=current_model, rewrite_lang=rewrite_lang,
-                               chunk_length=chunk_length)  # Add chunk_length
+                               chunk_length=chunk_length, max_tokens=max_tokens,
+                               timeout=timeout, temperature=temperature,
+                               base_url=base_url)  # Add base_url
             else:
                 output = translate(vtt_file, output_dir=out_dir,
                                 translate_language=translate_lang, 
                                 llm=current_model,
-                                chunk_length=chunk_length)  # Add chunk_length
+                                chunk_length=chunk_length, max_tokens=max_tokens,
+                                timeout=timeout, temperature=temperature,
+                                base_url=base_url)  # Add base_url
             
             # Use consistent key naming
             key = f"speaker_{speaker}" if multi_language and speaker is not None else 'output'
@@ -119,11 +124,14 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
 
 def create_interface():
     def process_wrapper(file_path, url, language, rewrite_llm, translate_llm, 
-                       multi_language, translate_lang, chunk_length):
+                       multi_language, translate_lang, chunk_length,
+                       max_tokens, timeout, temperature, base_url):
         multi_lang_bool = multi_language == "True"
         return process_input(file_path, url, language, rewrite_llm, translate_llm,
                            multi_lang_bool, translate_lang, rewrite_lang="Chinese",
-                           chunk_length=int(chunk_length))
+                           chunk_length=int(chunk_length), max_tokens=int(max_tokens),
+                           timeout=int(timeout), temperature=float(temperature),
+                           base_url=base_url)
     
     iface = gr.Interface(
         fn=process_wrapper,
@@ -137,6 +145,12 @@ def create_interface():
             gr.Textbox(label="Translation Language (optional)", value="Chinese", placeholder="Enter target translation language"),
             gr.Number(label="Chunk Length", value=8, 
                      info="Number of sentences per paragraph in output"),
+            gr.Number(label="Max Tokens", value=50000, info="Maximum tokens for LLM output"),
+            gr.Number(label="Timeout (seconds)", value=3600, info="LLM request timeout"),
+            gr.Slider(label="Temperature", minimum=0.0, maximum=1.0, value=0.1, 
+                     info="LLM temperature parameter"),
+            gr.Textbox(label="Base URL", value="http://localhost:11434",
+                      info="Base URL for LLM API"),
         ],
         outputs=[
             gr.Textbox(label="Final Rewritten Output"),
