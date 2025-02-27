@@ -4,12 +4,16 @@ A simple tool to make the video, audio, subtitle and video-url (especially youtu
 
 Initally, this porject is just serving to my website [GCDFL](https://www.gcdfl.org/). We do a service to turn its lectures into a written files for easier further editing. 
 
-Note: LLM can make mistakes and cannot be fully trusted. LLM can only be used for preliminary processing of data, some elementary work, and in this sense, LLM does greatly improve editing efficiency. 
+Wenbi is a Chinese name 文笔, meaning a good writting. 
+
+:warning: LLM can make mistakes (of course, human make mistakes too) and cannot be fully trusted. LLM can only be used for preliminary processing of data, some elementary work, and in this sense, LLM does greatly improve editing efficiency. 
 
 
-### you can try the [demo](https://archive.gcdfl.org/), right now only remove the timestamps and joining the lines. 
+### you can try the [demo](https://archive.gcdfl.org/). 
 
 ## Features
+
+- **100% Open source and totally free of use**. I love open source, I learned a lot from it. 
 
 - :100: Accept most popular audio, video, subtitle files and url--mainly using yt-dlp as input. 
 
@@ -19,38 +23,73 @@ Note: LLM can make mistakes and cannot be fully trusted. LLM can only be used fo
 
 - :100: offer an commandline and gradio GUI with multiple options for further personal settings 
 
-- :x: Right now are only support Ollama models, working on other models in OpenAi, Google and others. 
+- :100: The support provider is Ollama, you can use most of the models from ollama. 
 
+- :construction: other provider supporting, such as OpenAi, Google and Others. 
 
-## Cons
+- :construction: fine-tuned model for specific job, for example for my personal project from [GCDFL](https://www.gcdfl.org/), introducing the eastern churches to Chinese audience through academic lectures; [CTCFOL](https://www.ctcfol.org/), The Chinese Translation of Church Fathers from Original Languages. 
 
-- This project right now is main server to the language English, Chinese, Japanese. For other languages, trying to use a different Ollama models. 
+:warning: the default translating and rewritten language are Chinese, however, you can choose other Ollama models, and languages through our commandline options. 
 
 ## Install
+- You can install through pip (or other tools as uv or rye) and from source. 
 
 ### prerequest
 - Install [Ollama](https://ollama.com/) and dowload a model. The default model for this project is qwen2.5. 
 
-### method one 
+### Install through pip
 
-pip install wenbi
+1. build a virtue environment through [uv](https://docs.astral.sh/uv/guides/install-python/)--recommened or [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
 
-:notice: you may nedd install llvmlite and numba first, then install wenbi. Of course, you need install on a virtue environment.
+-for uv: `uv venv --python 3.12`
 
-After install, you can simply using wenbi commandline. 
+2. `uv pip install wenbi` or `uv add wenbi`
 
-### method two from source
+:warning: due to some package issues, it is better to install llvmlite and numba first by `uv add llvmlite numba` , then install wenbi. 
 
-- install [rye](https://rye.astral.sh/)
+After install, you can simply using wenbi commandline. if you want a gradio GUI, you can run `wenbi --gui`. the commandline options as follow: 
+```
+wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.
 
-### first step clone this repository
+positional arguments:
+  input                 Path to input file or URL
 
-`
+options:
+  -h, --help            show this help message and exit
+  --output-dir OUTPUT_DIR
+                        Output directory (optional)
+  --gui                 Launch Gradio GUI
+  --rewrite-llm REWRITE_LLM
+                        Rewrite LLM model identifier (optional)
+  --translate-llm TRANSLATE_LLM
+                        Translation LLM model identifier (optional)
+  --transcribe-lang TRANSCRIBE_LANG
+                        Transcribe language (optional)
+  --translate-lang TRANSLATE_LANG
+                        Target translation language (default: Chinese)
+  --rewrite-lang REWRITE_LANG
+                        Target language for rewriting (default: Chinese)
+  --multi-language      Enable multi-language processing
+  --chunk-length CHUNK_LENGTH
+                        the chunk of Number of sentences per paragraph for llm to tranlsate or rewrite.
+                        (default: 8)
+  --max-tokens MAX_TOKENS
+                        Maximum tokens for LLM output (default: 50000)
+  --timeout TIMEOUT     LLM request timeout in seconds (default: 3600)
+  --temperature TEMPERATURE
+                        LLM temperature parameter (default: 0.1)
+  --base-url BASE_URL   Base URL for LLM API (default: http://localhost:11434)
+
+```
+
+### Install from Source
+
+1. install [rye](https://rye.astral.sh/)
+
+2. `
 git clone https://github.com/Areopaguaworkshop/wenbi.git
 ` 
-
-### second step 
-
+3. 
 ```
 cd wenbi 
 
@@ -60,67 +99,44 @@ rye init
 
 ```
 
-### third step
-
-`
+4. `
 copy whole content of the pyproject-bk.toml into pyproject.toml
 ` 
-
-Then run
-
+5. 
 `source .venv/bin/activate` 
 
 `rye pin 3.12` 
 
 `rye sync`
 
-### four step
+:warning: Again, you may face some package issues. you can either install the depencies one by one in the pyproject-bk.toml, or  add llvmlite and numba first by `rye add llvmlite numba` , then install wenbi. 
 
-You can choose commandline or webGUI through gradio.
+6. You can choose commandline or webGUI through gradio.
 
 - gradio
 
-`python main.py`
+`python wenbi/main.py`
 
 Then go to http://localhost:7860. 
 
 - commandline 
 
-'python cli.py --help'
+'python wenbi/cli.py --help'
 
-usage: cli.py [-h] [--language LANGUAGE] [--llm LLM] [--multi-language] [--translate-lang TRANSLATE_LANG] [--output-dir OUTPUT_DIR] input
-
-wenbi: Convert video, audio, url or subtitle files to CSV and written Markdown outputs.
-
-positional arguments:
-  input                 Path to input file or URL
-
-options:
-  -h, --help            show this help message and exit
-  --language LANGUAGE   Transcribe Language (optional)
-  --llm LLM             Large Language Model identifier (optional)
-  --multi-language      Enable multi-language processing (default: False)
-  --translate-lang TRANSLATE_LANG
-                        Target translation language (default: Chinese)
-  --output-dir OUTPUT_DIR
-                        Output directory (optional)
-
-
-
-Note: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you nedd a HUGGINGFACE_TOKEN in you environment. by `export HUGGINGFACE_TOKEN="you HUGGINGFACE_TOKEN here"`. 
+:warning: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you nedd a HUGGINGFACE_TOKEN in you environment. by `export HUGGINGFACE_TOKEN="you HUGGINGFACE_TOKEN here"`. 
 
 
 Enjoy! 
 
-### Buy me a Cofee. 
+### Buy me a [Cofee](https://www.gcdfl.org/donate/). 
 
 ## License:
 AI-Subtitle-Editor is licensed under the Apache License 2.0 found in the [LICENSE](https://github.com/Areopaguaworkshop/AI-Subtitle-Editor/blob/main/license.md) file in the root directory of this repository.
 
 ## Citation:
-```@article{areopagus/wenbi
+```@article{Areopaguaworkshop/wenbi
   title = {wenbi},
-  author = {Yuan, Yongjia},
+  author = {Ephrem, Yuan},
   year = {2024},
 }
 
