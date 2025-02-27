@@ -1,30 +1,31 @@
 import dspy
 import os
-import spacy  # Add this import
 from wenbi.utils import segment
 
-# following functions associated with the models, 
+# following functions associated with the models,
 # for a better performance, we set a --llm option in both command line
-# and gradio interface to allow users to specify the model they want to use. 
+# and gradio interface to allow users to specify the model they want to use.
 
-def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
+
+def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", chunk_length=8):
     """
     Translate English VTT content to a bilingual markdown file using the target language provided.
-    
+
     Args:
         vtt_path (str): Path to the English VTT file
         output_dir (str): Directory for output files
         translate_language (str): Target language for translation
         llm (str): LLM model identifier
-        
+        chunk_length (int): Number of sentences per chunk for segmentation
+
     Returns:
         str: Path to the generated markdown file
     """
-    segmented_text = segment(vtt_path, sentence_count=10)
+    segmented_text = segment(vtt_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
-    
+
     # Use provided LLM model or default to "ollama/qwen2.5"
-    model_id = llm.strip() if llm.strip() else "ollama/qwen2.5"
+    model_id = llm if llm else "ollama/qwen2.5"
     lm = dspy.LM(
         base_url="http://localhost:11434",
         model=model_id,
@@ -35,7 +36,9 @@ def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
 
     class Translate(dspy.Signature):
         english_text = dspy.InputField(desc="English text to translate")
-        translated_text = dspy.OutputField(desc=f"Translation into {translate_language}")
+        translated_text = dspy.OutputField(
+            desc=f"Translation into {translate_language}"
+        )
 
     translator = dspy.ChainOfThought(Translate)
     translated_pairs = []
@@ -44,7 +47,9 @@ def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
         if para.strip():
             response = translator(english_text=para)
             translated_pairs.append(
-                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
+                f"# English\n{para}\n\n# {translate_language}\n{
+                    response.translated_text
+                }\n\n---\n"
             )
 
     markdown_content = "\n".join(translated_pairs)
@@ -55,47 +60,53 @@ def translate(vtt_path, output_dir, translate_language="Chinese", llm=""):
     return output_file
 
 
-def rewrite(file_path, output_dir=None):
-    """Rewrites text by first segmenting the file into paragraphs."""
-    from wenbi.utils import segment
-    segmented_text = segment(file_path)
+def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_length=8):
+    """
+    Rewrites text by first segmenting the file into paragraphs.
+
+    Args:
+        file_path (str): Path to the input file
+        output_dir (str, optional): Output directory
+        llm (str): LLM model identifier
+        rewrite_lang (str): Target language for rewriting (default: Chinese)
+        chunk_length (int): Number of sentences per chunk for segmentation
+    """
+    segmented_text = segment(file_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
-    
-    # Use basic language support without loading models
-    try:
-        if any(ord(c) > 0x4e00 and ord(c) < 0x9fff for c in segmented_text):
-            nlp = spacy.blank("zh")
-        else:
-            nlp = spacy.blank("en")
-    except Exception as e:
-        print(f"Error creating language processor: {e}")
-        print("Falling back to basic English")
-        nlp = spacy.blank("en")
 
     # Configure the LM without hard-coding the model parameter (this will be patched externally)
+    model_id = llm if llm else "ollama/qwen2.5"
     lm = dspy.LM(
+        model=model_id,
         base_url="http://localhost:11434",
         max_tokens=50000,
         timeout_s=3600,
         temperature=0.1,
     )
     dspy.configure(lm=lm)
-    
+
     rewritten_paragraphs = []
     # Loop over paragraphs and rewrite each individually
     for para in paragraphs:
+
         class ParaRewrite(dspy.Signature):
             """
-            重写此段，将口语表达变成书面表达，确保意思不变。
-            保证重写后的文本长度不少于原文的95%。
+            Rewrite this text in {rewrite_lang}, converting from spoken to written form
+            while preserving the meaning. Ensure the rewritten text is at least 95%
+            of the original length.
             """
-            text: str = dspy.InputField(desc="需要重写的口语讲座")
-            rewritten: str = dspy.OutputField(desc="重写后的段落")
-        
+
+            text: str = dspy.InputField(
+                desc=f"Spoken text to rewrite in {rewrite_lang}"
+            )
+            rewritten: str = dspy.OutputField(
+                desc=f"Rewritten paragraph in {rewrite_lang}"
+            )
+
         rewrite = dspy.ChainOfThought(ParaRewrite)
         response = rewrite(text=para)
         rewritten_paragraphs.append(response.rewritten)
-    
+
     rewritten_text = "\n\n".join(rewritten_paragraphs)
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]

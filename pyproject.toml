@@ -1,6 +1,6 @@
 [project]
 name = "wenbi"
-version = "0.14.1"
+version = "0.14.3"
 description = "A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. "
 license = "Apache-2.0"
 authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
@@ -16,9 +16,10 @@ dependencies = [
     "yt-dlp>=2025.2.19",
     "pyannote-audio>=3.3.2",
     "pip>=25.0.1",
+    "langdetect>=1.0.9",
 ]
 readme = "README.md"
-requires-python = ">= 3.9"
+requires-python = ">= 3.10"
 
 [project.scripts]
 wenbi = "wenbi.cli:main"
@@ -35,4 +36,4 @@ dev-dependencies = []
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/wenbi"]
+packages = ["wenbi"]

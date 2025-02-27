@@ -6,10 +6,10 @@ from moviepy.video.io.VideoFileClip import VideoFileClip  # Changed import
 
 # Use AudioFileClip for audio conversion
 from moviepy.audio.io.AudioFileClip import AudioFileClip
-import fasttext  # new import for language detection
 from spacy.lang.zh import Chinese  # Add this import
 from spacy.lang.en import English  # Add this import
 import spacy  # Add this import
+from langdetect import detect, detect_langs, LangDetectException  # Add this import
 
 # the following functions are used in the main.py file,
 # most of them are convertors, from ulr, video and audio and subtitle
@@ -251,81 +251,32 @@ def video_to_audio(video_path, output_dir=None):
         raise Exception(f"Error extracting audio from video: {e}")
 
 
-def language_detect(file_path):
+def language_detect(file_path, detected_lang=None):
     """
-    Detects the language of a text file using fastText.
-    Handles different encodings and binary files gracefully.
+    Detects the language of a text file using langdetect.
+    Returns language code (e.g., 'zh', 'en', 'ja', etc.).
     """
     try:
-        # Use the FastText model from the user cache (~/.fasttext/lid.176.bin)
-        model_path = os.path.join(os.path.expanduser("~"), ".fasttext", "lid.176.bin")
-        if not os.path.exists(model_path):
-            print(f"Warning: Language detection model not found at {model_path}")
-            print(
-                "Please download it from https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin"
-            )
-            print("Attempting to detect language from content patterns...")
-            # Fallback to basic pattern detection
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in content):
-                return "zh"  # Contains Chinese characters
-            return "en"  # Default to English if no Chinese characters found
-
-        model = fasttext.load_model(model_path)
-
-        # Extended list of encodings with Chinese support
-        encodings = [
-            "utf-8",
-            "utf-8-sig",
-            "utf-16",
-            "utf-32",
-            "gb2312",  # Simplified Chinese
-            "gbk",  # Chinese National Standard
-            "gb18030",  # Unified Chinese
-            "big5",  # Traditional Chinese (Taiwan/Hong Kong)
-            "big5hkscs",  # Hong Kong variant
-            "cp936",  # Windows Chinese
-            "hz",  # Chinese HZ encoding
-            "iso2022_jp",  # Japanese (some Chinese characters)
-            "ascii",
-            "iso-8859-1",
-        ]
-
-        text = None
-        successful_encoding = None
-
-        for encoding in encodings:
-            try:
-                with open(file_path, "r", encoding=encoding) as f:
-                    text = f.read()
-                successful_encoding = encoding
-                break
-            except (UnicodeDecodeError, LookupError):
-                continue
-
-        if text is None:
-            raise ValueError(
-                f"Could not decode file with any of {
-                    len(encodings)
-                } supported encodings"
-            )
-
-        print(f"Successfully read file using {successful_encoding} encoding")
-        labels, _ = model.predict(text, k=1)
-        return labels[0].replace("__label__", "")
-
-    except Exception as e:
+        df = parse_subtitle(file_path)
+        sample_content = " ".join(df["Content"].head(20))
+        
+        # Try to detect language with confidence scores
+        languages = detect_langs(sample_content)
+        if languages:
+            # Get the most probable language
+            detected = languages[0].lang
+            # Normalize Chinese variants
+            return 'zh' if detected.startswith('zh') else detected
+            
+    except LangDetectException as e:
         print(f"Language detection error: {str(e)}")
-        print("Defaulting to simple character-based detection...")
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in content):
-                return "zh"
-        except:
-            pass
-        return "en"
+    except Exception as e:
+        print(f"Unexpected error in language detection: {str(e)}")
+    
+    # Fallback to basic character detection
+    if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in sample_content):
+        return "zh"
+    return "en"
 
 
 def audio_wav(audio_path, output_dir=None):

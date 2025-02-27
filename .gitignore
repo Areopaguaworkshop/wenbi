@@ -24,7 +24,7 @@ ENV/
 .DS_Store
 
 # Project specific
-output/**/*
+wenbi/output/**/*
 model/**/*
 example/**/*
 *.wav
