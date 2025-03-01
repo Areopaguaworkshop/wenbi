@@ -44,34 +44,32 @@ def parse_subtitle(file_path, vtt_file=None):
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            # Added pattern to support timestamps like "00:00:51.160 --> 00:01:00.700"
+            # Check for timestamp line
             if "-->" in line or re.match(
                 r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}", line
             ):
                 timestamps.append(line)
                 i += 1
                 current_content = []
-                while (
-                    i < len(lines)
-                    and lines[i].strip()
-                    and not re.match(
-                        r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}",
-                        lines[i].strip(),
-                    )
+                # Skip any empty lines and collect text until a new timestamp is detected.
+                while i < len(lines) and not re.match(
+                    r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}",
+                    lines[i].strip()
                 ):
-                    current_content.append(lines[i].strip())
+                    stripped = lines[i].strip()
+                    if stripped:  # only add non-empty text lines
+                        current_content.append(stripped)
                     i += 1
                 contents.append(" ".join(current_content))
+            # Handle other subtitle formats (Dialogue or similar)
             elif "Dialogue:" in line or re.match(r"{\d+}{\d+}.*", line):
                 timestamps.append(line)
                 i += 1
                 current_content = []
-                while (
-                    i < len(lines)
-                    and lines[i].strip()
-                    and not lines[i].strip().isdigit()
-                ):
-                    current_content.append(lines[i].strip())
+                while i < len(lines) and not lines[i].strip().isdigit():
+                    stripped = lines[i].strip()
+                    if stripped:
+                        current_content.append(stripped)
                     i += 1
                 contents.append(" ".join(current_content))
             else:
@@ -254,28 +252,20 @@ def video_to_audio(video_path, output_dir=None):
 def language_detect(file_path, detected_lang=None):
     """
     Detects the language of a text file using langdetect.
-    Returns language code (e.g., 'zh', 'en', 'ja', etc.).
+    Returns language code (e.g., 'zh', 'en', etc.).
     """
     try:
         df = parse_subtitle(file_path)
         sample_content = " ".join(df["Content"].head(20))
-        
-        # Try to detect language with confidence scores
+        if not sample_content.strip():
+            # Fallback if file content is empty or only whitespace
+            return "en"
         languages = detect_langs(sample_content)
         if languages:
-            # Get the most probable language
             detected = languages[0].lang
-            # Normalize Chinese variants
-            return 'zh' if detected.startswith('zh') else detected
-            
-    except LangDetectException as e:
-        print(f"Language detection error: {str(e)}")
+            return "zh" if detected.startswith("zh") else detected
     except Exception as e:
-        print(f"Unexpected error in language detection: {str(e)}")
-    
-    # Fallback to basic character detection
-    if any(ord(c) > 0x4E00 and ord(c) < 0x9FFF for c in sample_content):
-        return "zh"
+        print(f"Language detection error: {e}")
     return "en"
 
 

@@ -25,13 +25,10 @@ def separate_speakers(audio_path, auth_token=None):
     Returns:
         dict: Dictionary mapping speaker IDs to list of time segments
     """
-    # Initialize speaker diarization pipeline
+    # Removed min_duration argument (no longer supported)
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         use_auth_token=auth_token,
-        min_duration=0.5,
-        sad={"min_duration_on": 0.5, "min_duration_off":
-        0.5},
     )
     
     # Run diarization
@@ -128,28 +125,25 @@ def transcribe_multi_speaker(audio_path, language_hints=None):
 
 def format_transcription(transcriptions):
     """
-    Format transcriptions into VTT format with speaker labels.
+    Format transcriptions into VTT format without language tags.
     
     Args:
         transcriptions (dict): Output from transcribe_multi_speaker()
         
     Returns:
-        str: VTT formatted transcription
+        str: VTT formatted transcription without language tag lines.
     """
     vtt_lines = ["WEBVTT\n"]
     
     for speaker, data in transcriptions.items():
-        language = data['detected_language']
+        # Remove language tag; do not extract 'detected_language'
         for segment in data['segments']:
-            # Debug: confirm format_timestamp is callable
-            if not callable(format_timestamp):
-                print("Error: format_timestamp is not callable!")
             start = format_timestamp(segment['start'])
             end = format_timestamp(segment['end'])
             text = segment['text'].strip()
             
             vtt_lines.append(f"\n{start} --> {end}")
-            vtt_lines.append(f"[{speaker} - {language}]")
+            # Removed the line that adds language tag
             vtt_lines.append(f"{text}\n")
     
     return "\n".join(vtt_lines)
