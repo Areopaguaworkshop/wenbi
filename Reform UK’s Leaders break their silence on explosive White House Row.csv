@@ -1,0 +1,73 @@
+Audio File: /home/ajiap/project/wenbi/Reform UK’s Leaders break their silence on explosive White House Row.wav
+Media_Metadata: {
+  "format": {
+    "bit_rate": "1536007",
+    "duration": "80.224958",
+    "filename": "/home/ajiap/project/wenbi/Reform UK\u2019s Leaders break their silence on explosive White House Row.wav",
+    "format_long_name": "WAV / WAVE (Waveform Audio)",
+    "format_name": "wav",
+    "nb_programs": 0,
+    "nb_streams": 1,
+    "probe_score": 99,
+    "size": "15403270",
+    "tags": {
+      "encoder": "Lavf60.16.100"
+    }
+  },
+  "streams": [
+    {
+      "avg_frame_rate": "0/0",
+      "bit_rate": "1536000",
+      "bits_per_sample": 16,
+      "channels": 2,
+      "codec_long_name": "PCM signed 16-bit little-endian",
+      "codec_name": "pcm_s16le",
+      "codec_tag": "0x0001",
+      "codec_tag_string": "[1][0][0][0]",
+      "codec_type": "audio",
+      "disposition": {
+        "attached_pic": 0,
+        "captions": 0,
+        "clean_effects": 0,
+        "comment": 0,
+        "default": 0,
+        "dependent": 0,
+        "descriptions": 0,
+        "dub": 0,
+        "forced": 0,
+        "hearing_impaired": 0,
+        "karaoke": 0,
+        "lyrics": 0,
+        "metadata": 0,
+        "non_diegetic": 0,
+        "original": 0,
+        "still_image": 0,
+        "timed_thumbnails": 0,
+        "visual_impaired": 0
+      },
+      "duration": "80.224958",
+      "duration_ts": 3850798,
+      "index": 0,
+      "initial_padding": 0,
+      "r_frame_rate": "0/0",
+      "sample_fmt": "s16",
+      "sample_rate": "48000",
+      "time_base": "1/48000"
+    }
+  ]
+}
+
+,Timestamps,Content
+0,00:00:00.000 --> 00:00:04.800,"Many of you might have already seen the explosive row between U.S. President Donald Trump,"
+1,00:00:04.800 --> 00:00:10.400,"Vice President J.D. Vance, and Ukraine's President Volodymyr Zelensky that happened in the Oval"
+2,00:00:10.400 --> 00:00:17.440,"Office. Now that the world is divided between the U.S. and Ukraine, Reform UK's Nigel Farage"
+3,00:00:17.440 --> 00:00:24.320,"and Rupert Lowe have broken their silence. Most recently, Reform UK's Nigel Farage"
+4,00:00:24.320 --> 00:00:27.920,"broke his silence by writing a tweet on X in which he wrote,"
+5,00:00:27.920 --> 00:00:33.360,The spat in the White House last night is regrettable and will make Putin feel like the winner.
+6,00:00:33.360 --> 00:00:38.960,"But this is not the end of the story, far from it. A peace deal is essential,"
+7,00:00:39.440 --> 00:00:47.280,"and Ukraine needs the right security guarantees. Similarly, Reform UK's Rupert Lowe also broke his"
+8,00:00:47.280 --> 00:00:53.600,"silence by writing a tweet on X in which he wrote, That is not a conversation that needed to happen"
+9,00:00:53.600 --> 00:01:00.160,"in front of the cameras. This helps nobody in the West. It is clear that Britain needs a far stronger,"
+10,00:01:00.160 --> 00:01:06.720,"a far bigger, and a far more powerful military. Our armed forces have been neglected for too long."
+11,00:01:07.440 --> 00:01:13.760,That must now change. Do you also think the United Kingdom should now focus more on their defense?
+12,00:01:13.760 --> 00:01:29.200,"If you agree, please like this video if you agree, and feel free to comment down your thoughts."

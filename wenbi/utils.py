@@ -79,11 +79,12 @@ def parse_subtitle(file_path, vtt_file=None):
 
 
 def rm_rep(file_path):
-    """Removes repeated words/phrases from a file."""
+    """Removes repeated Chinese characters/phrases from a file."""
     try:
         vtt_df = parse_subtitle(file_path)
         all_content = " ".join(vtt_df["Content"])
-        pattern = r"(([\u4e00-\u9fa5A-Za-z，。！？；：“”（）【】《》、]{1,5}))(\s?\1)+"
+        # Modified pattern to only match repeated Chinese characters
+        pattern = r"(([\u4e00-\u9fa5，。！？；：""（）【】《》、]{1,5}))(\s?\1)+"
         return re.sub(pattern, r"\1", all_content)
     except Exception as e:
         return f"An error occurred: {e}"
@@ -135,7 +136,7 @@ def transcribe(file_path, language=None, output_dir=None):
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     out_file = os.path.join(output_dir, base_name + ".vtt")
     with open(out_file, "w", encoding="utf-8") as f:
-        f.write("".join(vtt_content))
+        f.write(" ".join(vtt_content))
 
     return out_file, detected_language
 

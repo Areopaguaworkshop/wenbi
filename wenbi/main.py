@@ -1,27 +1,29 @@
-from download import download_all  # Import download helper
-from utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio
-from model import rewrite, translate
+from wenbi.utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio
+from wenbi.model import rewrite, translate
 import os
 import gradio as gr
 import sys
 import dspy
 
-# Add output directory constant
+# Only use package-relative output dir for web interface
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Download required models before processing
-download_all()
-
-def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="", multi_language=False, translate_lang="Chinese", output_dir=""):
+def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="",
+                  multi_language=False, translate_lang="Chinese", output_dir="",
+                  rewrite_lang="Chinese", chunk_length=8,
+                  max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
     2. Generate VTT file(s) via transcription
     3. Process VTT based on language detection
     """
-    out_dir = output_dir if output_dir and output_dir.strip() else OUTPUT_DIR
+    # Use current directory for CLI, package directory for web interface
+    out_dir = (output_dir if output_dir.strip() else 
+               OUTPUT_DIR if __name__ == "__main__" else 
+               os.getcwd())
     os.makedirs(out_dir, exist_ok=True)
     
     if not file_path and not url:
@@ -46,15 +48,13 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
     # Step 2: Generate VTT file(s) through transcription
     try:
         if multi_language:
-            # Multi-speaker transcription path
-            from mutilang import transcribe_multi_speaker, speaker_vtt
+            from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
             base_name = os.path.splitext(os.path.basename(file_path))[0]
             transcriptions = transcribe_multi_speaker(file_path)
             vtt_files = speaker_vtt(transcriptions, output_dir=out_dir, base_filename=base_name)
         else:
-            # Single speaker transcription path
             if file_path.lower().endswith(('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt')):
-                vtt_files = {None: file_path}  # Use existing subtitle file
+                vtt_files = {None: file_path}
             else:
                 lang = language if language.strip() else None
                 vtt_file, _ = transcribe(file_path, language=lang, output_dir=out_dir)
@@ -67,30 +67,25 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
     final_outputs = {}
     try:
         for speaker, vtt_file in vtt_files.items():
-            # Generate CSV first (if not multi-speaker)
             if not multi_language:
                 base_name = os.path.splitext(os.path.basename(vtt_file))[0]
                 csv_file = os.path.join(out_dir, f"{base_name}.csv")
                 parse_subtitle(vtt_file).to_csv(csv_file, index=True, encoding='utf-8')
                 print(f"CSV file '{csv_file}' created successfully.")
 
-            # Detect language and process accordingly
             detected_lang = language_detect(vtt_file)
             print(f"Detected language for {speaker or 'input'}: {detected_lang}")
 
-            # Configure LLM model and process
             if detected_lang == "zh" and translate_lang.lower() == "chinese":
-                # Chinese content - use rewrite with specified model
-                output = rewrite(vtt_file, output_dir=out_dir, llm=rewrite_llm)
+                output = rewrite(vtt_file, output_dir=out_dir, llm=rewrite_llm,
+                                 rewrite_lang=rewrite_lang, chunk_length=chunk_length,
+                                 max_tokens=max_tokens, timeout=timeout, temperature=temperature, base_url=base_url)
             else:
-                # Non-Chinese content - use translate with specified model
-                output = translate(vtt_file, output_dir=out_dir, 
-                                translate_language=translate_lang, 
-                                llm=translate_llm)
-
+                output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang,
+                                   llm=translate_llm, chunk_length=chunk_length,
+                                   max_tokens=max_tokens, timeout=timeout, temperature=temperature, base_url=base_url)
             final_outputs[speaker if speaker else 'output'] = output
 
-        # Return appropriate output based on processing mode
         if multi_language:
             return final_outputs
         else:

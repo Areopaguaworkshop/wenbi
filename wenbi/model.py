@@ -1,6 +1,7 @@
 import dspy
 import os
 from wenbi.utils import segment
+from wenbi.citation import extract_metadata_header  # New import for header
 
 def is_ollama(model_string):
     """
@@ -64,16 +65,14 @@ def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", c
         if para.strip():
             response = translator(english_text=para)
             translated_pairs.append(
-                f"# English\n{para}\n\n# {translate_language}\n{
-                    response.translated_text
-                }\n\n---\n"
+                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
             )
 
     markdown_content = "\n".join(translated_pairs)
     output_file = os.path.splitext(vtt_path)[0] + "_bilingual.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(markdown_content)
-
+    
     return output_file
 
 
@@ -136,5 +135,7 @@ def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_le
         out_file = os.path.join(output_dir, f"{base_name}_rewritten.md")
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(rewritten_text)
-        return out_file
+    else:
+        out_file = None
+
     return rewritten_text
