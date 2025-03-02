@@ -83,8 +83,8 @@ def rm_rep(file_path):
     try:
         vtt_df = parse_subtitle(file_path)
         all_content = " ".join(vtt_df["Content"])
-        # Modified pattern to only match repeated Chinese characters
-        pattern = r"(([\u4e00-\u9fa5，。！？；：""（）【】《》、]{1,5}))(\s?\1)+"
+        # Fixed pattern with raw string and proper whitespace escape
+        pattern = r"(([\u4e00-\u9fa5，。！？；：""（）【】《》、]{1,5}))(\s{0,1}\1)+"
         return re.sub(pattern, r"\1", all_content)
     except Exception as e:
         return f"An error occurred: {e}"
