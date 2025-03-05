@@ -56,29 +56,33 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --output-dir OUTPUT_DIR
+  --output-dir OUTPUT_DIR, -o OUTPUT_DIR
                         Output directory (optional)
-  --gui                 Launch Gradio GUI
-  --rewrite-llm REWRITE_LLM
+  --gui, -g             Launch Gradio GUI
+  --rewrite-llm REWRITE_LLM, -rlm REWRITE_LLM
                         Rewrite LLM model identifier (optional)
-  --translate-llm TRANSLATE_LLM
+  --translate-llm TRANSLATE_LLM, -tlm TRANSLATE_LLM
                         Translation LLM model identifier (optional)
-  --transcribe-lang TRANSCRIBE_LANG
+  --transcribe-lang TRANSCRIBE_LANG, -s TRANSCRIBE_LANG
                         Transcribe language (optional)
-  --translate-lang TRANSLATE_LANG
+  --translate-lang TRANSLATE_LANG, -t TRANSLATE_LANG
                         Target translation language (default: Chinese)
-  --rewrite-lang REWRITE_LANG
+  --rewrite-lang REWRITE_LANG, -r REWRITE_LANG
                         Target language for rewriting (default: Chinese)
-  --multi-language      Enable multi-language processing
-  --chunk-length CHUNK_LENGTH
+  --multi-language, -m  Enable multi-language processing
+  --chunk-length CHUNK_LENGTH, -c CHUNK_LENGTH
                         the chunk of Number of sentences per paragraph for llm to tranlsate or rewrite.
                         (default: 8)
-  --max-tokens MAX_TOKENS
+  --max-tokens MAX_TOKENS, -mt MAX_TOKENS
                         Maximum tokens for LLM output (default: 50000)
-  --timeout TIMEOUT     LLM request timeout in seconds (default: 3600)
-  --temperature TEMPERATURE
+  --timeout TIMEOUT, -to TIMEOUT
+                        LLM request timeout in seconds (default: 3600)
+  --temperature TEMPERATURE, -tm TEMPERATURE
                         LLM temperature parameter (default: 0.1)
-  --base-url BASE_URL   Base URL for LLM API (default: http://localhost:11434)
+  --base-url BASE_URL, -u BASE_URL
+                        Base URL for LLM API (default: http://localhost:11434)
+  --transcribe-model {tiny,base,small,medium,large-v1,large-v2,large-v3}, -tsm {tiny,base,small,medium,large-v1,large-v2,large-v3,turbo}
+                        Whisper model size for transcription (default: large-v3, turbo)
 
 ```
 

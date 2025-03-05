@@ -2,19 +2,12 @@ import os
 import whisper
 import re
 import pandas as pd
-from moviepy.video.io.VideoFileClip import VideoFileClip  # Changed import
-
-# Use AudioFileClip for audio conversion
+from moviepy.video.io.VideoFileClip import VideoFileClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
-from spacy.lang.zh import Chinese  # Add this import
-from spacy.lang.en import English  # Add this import
-import spacy  # Add this import
-from langdetect import detect, detect_langs, LangDetectException  # Add this import
-
-# the following functions are used in the main.py file,
-# most of them are convertors, from ulr, video and audio and subtitle
-# to vtts text files.
-
+from spacy.lang.zh import Chinese
+from spacy.lang.en import English
+import spacy
+from langdetect import detect, detect_langs, LangDetectException
 
 def parse_subtitle(file_path, vtt_file=None):
     """
@@ -78,35 +71,17 @@ def parse_subtitle(file_path, vtt_file=None):
     return pd.DataFrame({"Timestamps": timestamps, "Content": contents})
 
 
-def rm_rep(file_path):
-    """Removes repeated Chinese characters/phrases from a file."""
-    try:
-        vtt_df = parse_subtitle(file_path)
-        all_content = " ".join(vtt_df["Content"])
-        # Fixed pattern with raw string and proper whitespace escape
-        pattern = r"(([\u4e00-\u9fa5，。！？；：""（）【】《》、]{1,5}))(\s{0,1}\1)+"
-        return re.sub(pattern, r"\1", all_content)
-    except Exception as e:
-        return f"An error occurred: {e}"
-
-
-def transcribe(file_path, language=None, output_dir=None):
+def transcribe(file_path, language=None, output_dir=None, model_size="large-v3"):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
-    Now accepts an optional output_dir where the VTT file will be saved.
-
+    
     Args:
         file_path (str): Path to the audio file
-        language (str, optional): Language code for transcription.
-        output_dir (str, optional): Directory to save the VTT file. Defaults to current directory.
-
-    Returns:
-        tuple: (Path to the generated VTT file, auto-detected language)
+        language (str, optional): Language code for transcription
+        output_dir (str, optional): Directory to save the VTT file
+        model_size (str, optional): Whisper model size (tiny, base, small, medium, large-v1, large-v2, large-v3)
     """
-    base, ext = os.path.splitext(file_path)
-    ext = ext.lower()
-
-    model = whisper.load_model("large-v3-turbo", device="cpu")
+    model = whisper.load_model(f"{model_size}", device="cpu")
     result = model.transcribe(
         file_path, fp16=False, verbose=True, language=language if language else None
     )
@@ -142,46 +117,45 @@ def transcribe(file_path, language=None, output_dir=None):
 
 
 def segment(file_path, sentence_count=8):
-    """
-    Segments a text file into paragraphs by grouping every N sentences.
+    """Segments a text file into paragraphs by grouping every N sentences."""
+    try:
+        vtt_df = parse_subtitle(file_path)
+        text = " ".join(vtt_df["Content"])
+        
+        # Directly use basic language classes
+        if any(char in text for char in "，。？！"):
+            nlp = Chinese()
+        else:
+            nlp = English()
 
-    Args:
-        file_path (str): Path to the text file
-        sentence_count (int): Number of sentences per paragraph (default: 8)
+        # Add the sentencizer component to the pipeline
+        if "sentencizer" not in nlp.pipe_names:
+            nlp.add_pipe("sentencizer")
 
-    Returns:
-        str: Paragraphs joined with double newlines
-    """
-    text = rm_rep(file_path)  # Integrate rm_rep here
+        doc = nlp(text)
 
-    # Directly use basic language classes
-    if any(char in text for char in "，。？！"):
-        nlp = Chinese()  # Use basic Chinese
-    else:
-        nlp = English()  # Use basic English
+        paragraphs = []
+        current_paragraph = []
+        current_count = 0
+        for sent in doc.sents:
+            # Add Chinese comma if needed
+            sent_text = sent.text.strip()
+            if not any(sent_text.endswith(p) for p in "，。？！,.!?"):
+                sent_text += "，"
+            current_paragraph.append(sent_text)
+            current_count += 1
+            if current_count >= sentence_count:
+                paragraphs.append("".join(current_paragraph))
+                current_paragraph = []
+                current_count = 0
 
-    # Add the sentencizer component to the pipeline
-    if "sentencizer" not in nlp.pipe_names:
-        nlp.add_pipe("sentencizer")
+        if current_paragraph:
+            paragraphs.append("".join(current_paragraph))
 
-    doc = nlp(text)
-
-    paragraphs = []
-    current_paragraph = []
-    current_count = 0
-    for sent in doc.sents:
-        current_paragraph.append(sent.text)
-        current_count += 1
-        if current_count >= sentence_count:
-            paragraphs.append(" ".join(current_paragraph))
-            current_paragraph = []
-            current_count = 0
-
-    if current_paragraph:
-        paragraphs.append(" ".join(current_paragraph))
-
-    segmented_text = "\n\n".join(paragraphs)
-    return segmented_text
+        return "\n\n".join(paragraphs)
+    except Exception as e:
+        print(f"Error in segment: {e}")
+        return text
 
 
 def download_audio(url, output_dir=None):

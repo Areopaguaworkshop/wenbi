@@ -75,16 +75,14 @@ def extract_speaker_segments(audio_path, speaker_segments):
     
     return speaker_files
 
-def transcribe_multi_speaker(audio_path, language_hints=None):
+def transcribe_multi_speaker(audio_path, language_hints=None, model_size="large-v3"):
     """
     Transcribe multi-speaker audio with language detection per speaker.
     
     Args:
         audio_path (str): Path to the WAV audio file
         language_hints (dict, optional): Dictionary mapping speaker IDs to language hints
-        
-    Returns:
-        dict: Dictionary containing speaker transcriptions and detected languages
+        model_size (str): Whisper model size to use
     """
     # Get your HuggingFace token from environment variable
     auth_token = os.getenv("HUGGINGFACE_TOKEN")
@@ -101,7 +99,7 @@ def transcribe_multi_speaker(audio_path, language_hints=None):
     
     # Step 3: Transcribe each speaker's audio
     print("Transcribing speaker segments...")
-    model = whisper.load_model("large-v3-turbo")
+    model = whisper.load_model(model_size)
     transcriptions = {}
     
     for spk, speaker_path in extract_speaker_segments(audio_path, separate_speakers(audio_path, os.getenv("HUGGINGFACE_TOKEN"))).items():

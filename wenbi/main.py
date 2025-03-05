@@ -14,7 +14,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="",
                   multi_language=False, translate_lang="Chinese", output_dir="",
                   rewrite_lang="Chinese", chunk_length=8,
-                  max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
+                  max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434",
+                  transcribe_model="large-v3"):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
     2. Generate VTT file(s) via transcription
@@ -50,14 +51,14 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
         if multi_language:
             from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
             base_name = os.path.splitext(os.path.basename(file_path))[0]
-            transcriptions = transcribe_multi_speaker(file_path)
+            transcriptions = transcribe_multi_speaker(file_path, model_size=transcribe_model)  # Pass model size
             vtt_files = speaker_vtt(transcriptions, output_dir=out_dir, base_filename=base_name)
         else:
             if file_path.lower().endswith(('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt')):
                 vtt_files = {None: file_path}
             else:
                 lang = language if language.strip() else None
-                vtt_file, _ = transcribe(file_path, language=lang, output_dir=out_dir)
+                vtt_file, _ = transcribe(file_path, language=lang, output_dir=out_dir, model_size=transcribe_model)  # Pass model size
                 vtt_files = {None: vtt_file}
     except Exception as e:
         print(f"Error in Step 2 (Transcription): {e}")

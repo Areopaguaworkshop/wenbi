@@ -1,6 +1,6 @@
 [project]
 name = "wenbi"
-version = "0.140.64"
+version = "0.140.65"
 description = "A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. "
 license = "Apache-2.0"
 authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
