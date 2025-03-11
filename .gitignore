@@ -24,13 +24,14 @@ ENV/
 .DS_Store
 
 # Project specific
-wenbi/output/**/*
+output/**/*
 model/**/*
 example/**/*
 *.wav
 *.md
 *.vtt
 *.bin
+*.csv
 
 # Testing
 .tox/

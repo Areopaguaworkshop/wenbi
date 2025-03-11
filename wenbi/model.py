@@ -3,6 +3,7 @@ import os
 from wenbi.utils import segment
 from wenbi.citation import extract_metadata_header  # New import for header
 
+
 def is_ollama(model_string):
     """
     Check the model_string (if provided) for the provider.
@@ -17,7 +18,18 @@ def is_ollama(model_string):
         return "http://localhost:11434"
     return None
 
-def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", chunk_length=8, max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
+
+def translate(
+    vtt_path,
+    output_dir=None,
+    translate_language="Chinese",
+    llm="",
+    chunk_length=8,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    base_url="http://localhost:11434",
+):
     """
     Translate English VTT content to a bilingual markdown file using the target language provided.
 
@@ -65,18 +77,30 @@ def translate(vtt_path, output_dir=None, translate_language="Chinese", llm="", c
         if para.strip():
             response = translator(english_text=para)
             translated_pairs.append(
-                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
+                f"# English\n{para}\n\n# {translate_language}\n{
+                    response.translated_text
+                }\n\n---\n"
             )
 
     markdown_content = "\n".join(translated_pairs)
     output_file = os.path.splitext(vtt_path)[0] + "_bilingual.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(markdown_content)
-    
+
     return output_file
 
 
-def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_length=8, max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434"):
+def rewrite(
+    file_path,
+    output_dir=None,
+    llm="",
+    rewrite_lang="Chinese",
+    chunk_length=8,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    base_url="http://localhost:11434",
+):
     """
     Rewrites text by first segmenting the file into paragraphs.
 
@@ -113,7 +137,7 @@ def rewrite(file_path, output_dir=None, llm="", rewrite_lang="Chinese", chunk_le
 
         class ParaRewrite(dspy.Signature):
             """
-            Rewrite this text in {rewrite_lang}, converting from spoken to written form
+            Rewrite this text in {rewrite_lang}, add punctuation, converting from spoken to written form
             while preserving the meaning. Ensure the rewritten text is at least 95%
             of the original length.
             """

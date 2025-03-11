@@ -9,6 +9,7 @@ from spacy.lang.en import English
 import spacy
 from langdetect import detect, detect_langs, LangDetectException
 
+
 def parse_subtitle(file_path, vtt_file=None):
     """
     Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame.
@@ -47,7 +48,7 @@ def parse_subtitle(file_path, vtt_file=None):
                 # Skip any empty lines and collect text until a new timestamp is detected.
                 while i < len(lines) and not re.match(
                     r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}",
-                    lines[i].strip()
+                    lines[i].strip(),
                 ):
                     stripped = lines[i].strip()
                     if stripped:  # only add non-empty text lines
@@ -74,7 +75,7 @@ def parse_subtitle(file_path, vtt_file=None):
 def transcribe(file_path, language=None, output_dir=None, model_size="large-v3"):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
-    
+
     Args:
         file_path (str): Path to the audio file
         language (str, optional): Language code for transcription
@@ -120,8 +121,8 @@ def segment(file_path, sentence_count=8):
     """Segments a text file into paragraphs by grouping every N sentences."""
     try:
         vtt_df = parse_subtitle(file_path)
-        text = " ".join(vtt_df["Content"])
-        
+        text = "。".join(vtt_df["Content"])
+
         # Directly use basic language classes
         if any(char in text for char in "，。？！"):
             nlp = Chinese()
