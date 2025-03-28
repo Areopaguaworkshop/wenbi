@@ -86,7 +86,8 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
     result = model.transcribe(
         file_path, fp16=False, verbose=True, language=language if language else None
     )
-    detected_language = result.get("language", language if language else "unknown")
+    detected_language = result.get(
+        "language", language if language else "unknown")
 
     # Create VTT content with proper timestamps
     vtt_content = ["WEBVTT\n"]
@@ -268,7 +269,8 @@ def audio_wav(audio_path, output_dir=None):
 
     try:
         audio_clip = AudioFileClip(audio_path)
-        audio_clip.write_audiofile(wav_path, codec="pcm_s16le")  # PCM format for WAV
+        audio_clip.write_audiofile(
+            wav_path, codec="pcm_s16le")  # PCM format for WAV
         audio_clip.close()
         return wav_path
     except Exception as e:
