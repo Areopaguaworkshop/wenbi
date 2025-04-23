@@ -300,6 +300,8 @@ murmurhash==1.0.12
     # via thinc
 narwhals==1.28.0
     # via marimo
+natsort==8.4.0
+    # via wenbi
 networkx==3.4.2
     # via torch
 nodeenv==1.9.1

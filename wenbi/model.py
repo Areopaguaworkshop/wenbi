@@ -1,7 +1,6 @@
 import dspy
 import os
 from wenbi.utils import segment
-from wenbi.citation import extract_metadata_header  # New import for header
 
 
 def is_ollama(model_string):

@@ -22,12 +22,14 @@ dependencies = [
     "extruct>=0.18.0",
     "marimo>=0.11.13",
     "marker-pdf>=1.6.2",
+    "natsort>=8.4.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"
 
 [project.scripts]
 wenbi = "wenbi.cli:main"
+wenbi-batch = "wenbi.batch:main"
 
 [build-system]
 requires = ["hatchling==1.26.3", "hatch-vcs"]
@@ -41,4 +43,7 @@ dev-dependencies = []
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["wenbi"]
+packages = [
+    "wenbi",
+    "wenbi.batch",
+]
