@@ -1,0 +1,18 @@
+output_dir: "./output"
+rewrite_llm: "ollama/qwen2.5"
+translate_llm: "ollama/qwen2.5"
+translate_lang: "Chinese"
+transcribe_model: "large-v3"
+
+inputs:
+  - input: "https://youtube.com/watch?v=example1"
+    title: "First Video"
+    transcribe_lang: "English"
+  
+  - input: "/path/to/local/video.mp4"
+    title: "Second Video"
+    transcribe_lang: "Chinese"
+    
+  - input: "https://youtube.com/watch?v=example2"
+    title: "Third Video"
+    translate_lang: "Japanese"  # Override global setting

@@ -3,18 +3,45 @@ import argparse
 import os
 import sys
 import subprocess
+import yaml
 from wenbi.main import process_input
 from wenbi.download import download_all
 
 
+def load_config(config_path):
+    if not config_path:
+        return {}
+    with open(config_path) as f:
+        return yaml.safe_load(f)
+
+
+def combine_markdown_files(outputs, output_dir, final_filename="combined_output.md"):
+    """Combine multiple markdown outputs into a single file"""
+    combined_path = os.path.join(output_dir, final_filename)
+    with open(combined_path, 'w', encoding='utf-8') as f:
+        for idx, (title, content) in enumerate(outputs):
+            if idx > 0:
+                f.write('\n---\n\n')  # Separator between sections
+            f.write(f'# {title}\n\n')
+            # Read and append content from markdown file
+            if os.path.isfile(content):
+                with open(content, 'r', encoding='utf-8') as mf:
+                    f.write(mf.read())
+            else:
+                f.write(content)
+    return combined_path
+
+
 def main():
     download_all()
-    # Run download_all() to ensure necessary models are present
     parser = argparse.ArgumentParser(
         description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs."
     )
     parser.add_argument(
         "input", nargs="?", default="", help="Path to input file or URL"
+    )
+    parser.add_argument(
+        "--config", "-c", default="", help="Path to YAML configuration file"
     )
     parser.add_argument(
         "--output-dir", "-o", default="", help="Output directory (optional)"
@@ -56,12 +83,11 @@ def main():
     )
     parser.add_argument(
         "--chunk-length",
-        "-c",
+        "-cl",
         type=int,
         default=8,
         help="the chunk of Number of sentences per paragraph for llm to tranlsate or rewrite. (default: 8)",
     )
-    # Add new LLM configuration options
     parser.add_argument(
         "--max-tokens",
         "-mt",
@@ -89,7 +115,6 @@ def main():
         default="http://localhost:11434",
         help="Base URL for LLM API (default: http://localhost:11434)",
     )
-    # Add new transcribe model argument
     parser.add_argument(
         "--transcribe-model",
         "-tsm",
@@ -109,6 +134,71 @@ def main():
     )
     args = parser.parse_args()
 
+    # Handle config file processing
+    if args.config:
+        if not args.config.endswith(('.yml', '.yaml')):
+            print("Error: Config file must be a YAML file")
+            sys.exit(1)
+            
+        config = load_config(args.config)
+        if not isinstance(config, dict):
+            print("Error: Invalid YAML configuration")
+            sys.exit(1)
+
+        output_dir = config.get('output_dir', '')
+        inputs = config.get('inputs', [])
+        if not inputs:
+            print("Error: No inputs specified in config file")
+            sys.exit(1)
+
+        # Process each input and collect outputs
+        outputs = []
+        for input_config in inputs:
+            input_path = input_config.get('input', '')
+            if not input_path:
+                continue
+
+            # Merge global config with input-specific config
+            input_params = {**config, **input_config}
+            input_params.pop('inputs', None)  # Remove inputs list from params
+
+            is_url = input_path.startswith(("http://", "https://", "www."))
+            result = process_input(
+                None if is_url else input_path,
+                input_path if is_url else "",
+                **input_params
+            )
+            
+            if result[0] and result[3]:  # If we have output and filename
+                title = input_config.get('title', result[3])
+                outputs.append((title, result[1] or result[0]))
+
+        if outputs:
+            # Combine all outputs into a single markdown file
+            final_output = combine_markdown_files(outputs, output_dir)
+            print(f"Combined output saved to: {final_output}")
+        return
+
+    # Load config file if provided
+    config = load_config(args.config)
+    
+    # Command line arguments take precedence over config file
+    params = {
+        'output_dir': args.output_dir or config.get('output_dir', ''),
+        'rewrite_llm': args.rewrite_llm or config.get('rewrite_llm', ''),
+        'translate_llm': args.translate_llm or config.get('translate_llm', ''),
+        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+        'translate_lang': args.translate_lang or config.get('translate_lang', 'Chinese'),
+        'rewrite_lang': args.rewrite_lang or config.get('rewrite_lang', 'Chinese'),
+        'multi_language': args.multi_language or config.get('multi_language', False),
+        'chunk_length': args.chunk_length or config.get('chunk_length', 8),
+        'max_tokens': args.max_tokens or config.get('max_tokens', 50000),
+        'timeout': args.timeout or config.get('timeout', 3600),
+        'temperature': args.temperature or config.get('temperature', 0.1),
+        'base_url': args.base_url or config.get('base_url', 'http://localhost:11434'),
+        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3-turbo'),
+    }
+
     # If --gui is specified, run main.py to launch the GUI
     if args.gui:
         # Compute the absolute path of main.py, assumed to be in the same folder
@@ -126,20 +216,7 @@ def main():
     result = process_input(
         None if is_url else args.input,
         args.input if is_url else "",
-        args.transcribe_lang,
-        args.rewrite_llm,
-        args.translate_llm,
-        args.multi_language,
-        args.translate_lang,
-        args.output_dir,
-        args.rewrite_lang,
-        args.chunk_length,
-        max_tokens=args.max_tokens,
-        timeout=args.timeout,
-        temperature=args.temperature,
-        base_url=args.base_url,
-        # Make sure this matches the parameter name
-        transcribe_model=args.transcribe_model,
+        **params
     )
     print("Markdown Output:", result[0])
     print("Markdown File:", result[1])

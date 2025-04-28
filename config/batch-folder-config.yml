@@ -1,0 +1,12 @@
+output_dir: "output"
+rewrite_llm: "ollama/qwen2.5"
+translate_llm: "ollama/qwen2.5"
+transcribe_lang: "Chinese"
+translate_lang: "Chinese"
+rewrite_lang: "Chinese"
+multi_language: false
+chunk_length: 8
+max_tokens: 50000
+timeout: 3600
+temperature: 0.1
+md: "output.md"

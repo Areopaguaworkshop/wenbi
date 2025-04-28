@@ -5,12 +5,18 @@ import argparse
 from wenbi.cli import main as wenbi_main
 import sys
 import glob
+import yaml
 
 def is_media_file(filepath: Path) -> bool:
     """Check if file is video or audio"""
     video_extensions = {'.mp4', '.avi', '.mkv', '.mov', '.wmv'}
     audio_extensions = {'.mp3', '.wav', '.m4a', '.ogg', '.flac'}
     return filepath.suffix.lower() in video_extensions | audio_extensions
+
+def load_config(config_path):
+    """Load configuration from YAML file"""
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
 def combine_markdown_files(output_dir: str, combined_file: str):
     """Combine all markdown files in output directory into one file"""
@@ -79,6 +85,8 @@ def main():
         description="Batch process media files in a directory using wenbi"
     )
     parser.add_argument("input_dir", help="Input directory containing media files")
+    parser.add_argument("-c", "--config", help="YAML configuration file")
+    # Make all other arguments optional since they might come from config
     parser.add_argument("--output-dir", default="", help="Output directory (optional)")
     parser.add_argument("--rewrite-llm", help="Rewrite LLM model identifier")
     parser.add_argument("--translate-llm", help="Translation LLM model identifier")
@@ -94,6 +102,17 @@ def main():
     
     args = parser.parse_args()
     kwargs = vars(args)
+    
+    # Load config file if provided
+    config = {}
+    if args.config:
+        config = load_config(args.config)
+        # Remove config from kwargs to avoid passing it to batch_process
+        kwargs.pop('config')
+        # Update kwargs with config values, preserving command-line arguments
+        for key, value in config.items():
+            if key in kwargs and kwargs[key] is None:
+                kwargs[key] = value
     
     # Set default markdown filename based on input folder name
     md_output = kwargs.pop('md')
