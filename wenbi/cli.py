@@ -161,6 +161,8 @@ def main():
             # Merge global config with input-specific config
             input_params = {**config, **input_config}
             input_params.pop('inputs', None)  # Remove inputs list from params
+            input_params.pop('input', None) # Remove input from params
+            input_params.pop('title', None) # Remove title from params
 
             is_url = input_path.startswith(("http://", "https://", "www."))
             result = process_input(

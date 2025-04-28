@@ -1,0 +1,18 @@
+output_dir: "./output"
+rewrite_llm: "ollama/qwen2.5"
+translate_llm: "ollama/qwen2.5"
+translate_lang: "Chinese"
+transcribe_model: "large-v3-turbo"
+
+inputs:
+  - input: "https://www.youtube.com/watch?v=XM1atjY7tUE"
+    title: "为何维尔主教的《东正教教会》是最佳读物？"
+
+  - input: "https://www.youtube.com/watch?v=G4KpxQVLrhs"
+    title: "东正教的辖区和地域范围在哪里？"
+  - input: "https://www.youtube.com/watch?v=Px4qQLbHqyU"
+    title: "什么！基督教第一次分裂竟然发生在5世纪？"
+  - input: "https://www.youtube.com/watch?v=t5_3gllol3g"
+    title: "教会竟然不只有希腊和拉丁传统，还有叙利亚传"
+  - input: "https://www.youtube.com/watch?v=qspB6f_MjsM"
+    title: "现今东正教辖区概览"
