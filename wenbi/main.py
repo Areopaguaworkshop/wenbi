@@ -1,4 +1,11 @@
-from wenbi.utils import transcribe, parse_subtitle, video_to_audio, language_detect, audio_wav, download_audio
+from wenbi.utils import (
+    transcribe,
+    parse_subtitle,
+    video_to_audio,
+    language_detect,
+    audio_wav,
+    download_audio,
+)
 from wenbi.model import rewrite, translate
 import os
 import gradio as gr
@@ -11,22 +18,39 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 # Ensure project root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def process_input(file_path=None, url="", language="", rewrite_llm="", translate_llm="",
-                  multi_language=False, translate_lang="Chinese", output_dir="",
-                  rewrite_lang="Chinese", chunk_length=8,
-                  max_tokens=50000, timeout=3600, temperature=0.1, base_url="http://localhost:11434",
-                  transcribe_model="large-v3"):  # Add transcribe_model parameter
+
+def process_input(
+    file_path=None,
+    url="",
+    language="",
+    rewrite_llm="",
+    translate_llm="",
+    multi_language=False,
+    translate_lang="Chinese",
+    output_dir="",
+    rewrite_lang="Chinese",
+    chunk_length=8,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    base_url="http://localhost:11434",
+    transcribe_model="large-v3",
+):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
     2. Generate VTT file(s) via transcription
     3. Process VTT based on language detection
     """
     # Use current directory for CLI, package directory for web interface
-    out_dir = (output_dir if output_dir.strip() else 
-               OUTPUT_DIR if __name__ == "__main__" else 
-               os.getcwd())
+    out_dir = (
+        output_dir
+        if output_dir.strip()
+        else OUTPUT_DIR
+        if __name__ == "__main__"
+        else os.getcwd()
+    )
     os.makedirs(out_dir, exist_ok=True)
-    
+
     if not file_path and not url:
         return "Error: No input provided", None, None, None
 
@@ -39,7 +63,16 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
             ext = ext.lower()
             if ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v"}:
                 file_path = video_to_audio(file_path, output_dir=out_dir)
-            elif ext in {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".webm", ".opus"}:
+            elif ext in {
+                ".mp3",
+                ".wav",
+                ".flac",
+                ".aac",
+                ".ogg",
+                ".m4a",
+                ".webm",
+                ".opus",
+            }:
                 file_path = audio_wav(file_path, output_dir=out_dir)
             # Note: subtitle files don't need conversion
     except Exception as e:
@@ -50,15 +83,27 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
     try:
         if multi_language:
             from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
+
             base_name = os.path.splitext(os.path.basename(file_path))[0]
-            transcriptions = transcribe_multi_speaker(file_path, model_size=transcribe_model)  # Pass model size
-            vtt_files = speaker_vtt(transcriptions, output_dir=out_dir, base_filename=base_name)
+            transcriptions = transcribe_multi_speaker(
+                file_path, model_size=transcribe_model
+            )  # Pass model size
+            vtt_files = speaker_vtt(
+                transcriptions, output_dir=out_dir, base_filename=base_name
+            )
         else:
-            if file_path.lower().endswith(('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt')):
+            if file_path.lower().endswith(
+                (".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi", ".txt")
+            ):
                 vtt_files = {None: file_path}
             else:
                 lang = language if language.strip() else None
-                vtt_file, _ = transcribe(file_path, language=lang, output_dir=out_dir, model_size=transcribe_model)  # Pass model size
+                vtt_file, _ = transcribe(
+                    file_path,
+                    language=lang,
+                    output_dir=out_dir,
+                    model_size=transcribe_model,
+                )  # Pass model size
                 vtt_files = {None: vtt_file}
     except Exception as e:
         print(f"Error in Step 2 (Transcription): {e}")
@@ -71,47 +116,108 @@ def process_input(file_path=None, url="", language="", rewrite_llm="", translate
             if not multi_language:
                 base_name = os.path.splitext(os.path.basename(vtt_file))[0]
                 csv_file = os.path.join(out_dir, f"{base_name}.csv")
-                parse_subtitle(vtt_file).to_csv(csv_file, index=True, encoding='utf-8')
+                parse_subtitle(vtt_file).to_csv(
+                    csv_file, index=True, encoding="utf-8")
                 print(f"CSV file '{csv_file}' created successfully.")
 
             detected_lang = language_detect(vtt_file)
-            print(f"Detected language for {speaker or 'input'}: {detected_lang}")
+            print(f"Detected language for {
+                  speaker or 'input'}: {detected_lang}")
 
             if detected_lang == "zh" and translate_lang.lower() == "chinese":
-                output = rewrite(vtt_file, output_dir=out_dir, llm=rewrite_llm,
-                                 rewrite_lang=rewrite_lang, chunk_length=chunk_length,
-                                 max_tokens=max_tokens, timeout=timeout, temperature=temperature, base_url=base_url)
+                output = rewrite(
+                    vtt_file,
+                    output_dir=out_dir,
+                    llm=rewrite_llm,
+                    rewrite_lang=rewrite_lang,
+                    chunk_length=chunk_length,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    temperature=temperature,
+                    base_url=base_url,
+                )
             else:
-                output = translate(vtt_file, output_dir=out_dir, translate_language=translate_lang,
-                                   llm=translate_llm, chunk_length=chunk_length,
-                                   max_tokens=max_tokens, timeout=timeout, temperature=temperature, base_url=base_url)
-            final_outputs[speaker if speaker else 'output'] = output
+                output = translate(
+                    vtt_file,
+                    output_dir=out_dir,
+                    translate_language=translate_lang,
+                    llm=translate_llm,
+                    chunk_length=chunk_length,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    temperature=temperature,
+                    base_url=base_url,
+                )
+            final_outputs[speaker if speaker else "output"] = output
 
         if multi_language:
             return final_outputs
         else:
-            result = final_outputs['output']
+            result = final_outputs["output"]
             return result, result, csv_file, base_name
 
     except Exception as e:
         print(f"Error in Step 3 (Language Processing): {e}")
         return "Error: Failed during language processing", None, None, None
 
+
 def create_interface():
     # Updated textbox label for rewrite LLM model.
-    def process_wrapper(file_path, url, language, rewrite_llm, translate_llm, multi_language, translate_lang):
+    def process_wrapper(
+        file_path,
+        url,
+        language,
+        rewrite_llm,
+        translate_llm,
+        multi_language,
+        translate_lang,
+    ):
         multi_lang_bool = multi_language == "True"
-        return process_input(file_path, url, language, rewrite_llm, translate_llm, multi_lang_bool, translate_lang)
+        return process_input(
+            file_path,
+            url,
+            language,
+            rewrite_llm,
+            translate_llm,
+            multi_lang_bool,
+            translate_lang,
+        )
+
     iface = gr.Interface(
         fn=process_wrapper,
         inputs=[
             gr.File(label="Upload File", type="filepath"),
-            gr.Textbox(label="Or Enter URL (YouTube, etc)", value="", placeholder="https://youtube.com/watch?v=..."),
-            gr.Textbox(label="Transcribe Language (optional)", value="", placeholder="e.g., Chinese, English"),
-            gr.Textbox(label="Rewrite LLM Model (optional)", value="ollama/qwen2.5", placeholder="Enter rewrite LLM model identifier"),
-            gr.Textbox(label="Translation LLM Model (optional)", value="ollama/qwen2.5", placeholder="Enter translation LLM model identifier"),
-            gr.Dropdown(label="Multi-language Processing", choices=["False", "True"], value="False", type="value"),
-            gr.Textbox(label="Translation Language (optional)", value="Chinese", placeholder="Enter target translation language"),
+            gr.Textbox(
+                label="Or Enter URL (YouTube, etc)",
+                value="",
+                placeholder="https://youtube.com/watch?v=...",
+            ),
+            gr.Textbox(
+                label="Transcribe Language (optional)",
+                value="",
+                placeholder="e.g., Chinese, English",
+            ),
+            gr.Textbox(
+                label="Rewrite LLM Model (optional)",
+                value="ollama/qwen3",
+                placeholder="Enter rewrite LLM model identifier",
+            ),
+            gr.Textbox(
+                label="Translation LLM Model (optional)",
+                value="ollama/qwen3",
+                placeholder="Enter translation LLM model identifier",
+            ),
+            gr.Dropdown(
+                label="Multi-language Processing",
+                choices=["False", "True"],
+                value="False",
+                type="value",
+            ),
+            gr.Textbox(
+                label="Translation Language (optional)",
+                value="Chinese",
+                placeholder="Enter target translation language",
+            ),
         ],
         outputs=[
             gr.Textbox(label="Final Rewritten Output"),
@@ -124,7 +230,7 @@ def create_interface():
     )
     return iface
 
+
 if __name__ == "__main__":
     iface = create_interface()
     iface.launch()
-

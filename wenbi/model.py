@@ -7,7 +7,7 @@ def is_ollama(model_string):
     """
     Check the model_string (if provided) for the provider.
     If the model string starts with "ollama/", return "http://localhost:11434".
-    If model_string is empty, default to "ollama/qwen2.5" with base_url "http://localhost:11434".
+    If model_string is empty, default to "ollama/qwen3" with base_url "http://localhost:11434".
     Otherwise, return None.
     """
     if not model_string:
@@ -50,7 +50,7 @@ def translate(
     paragraphs = segmented_text.split("\n\n")
 
     # Determine final base_url based on model string if user provided an llm option.
-    model_id = llm if llm else "ollama/qwen2.5"
+    model_id = llm if llm else "ollama/qwen3"
     checked_url = is_ollama(model_id)
     final_base_url = checked_url if checked_url is not None else None
 
@@ -117,7 +117,7 @@ def rewrite(
     segmented_text = segment(file_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
 
-    model_id = llm if llm else "ollama/qwen2.5"
+    model_id = llm if llm else "ollama/qwen3"
     checked_url = is_ollama(model_id)
     final_base_url = checked_url if checked_url is not None else None
 
