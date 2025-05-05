@@ -48,8 +48,7 @@ def process_yaml_config(config):
     # Handle single input with segments
     if 'input' in config and 'segments' in config:
         input_path = config['input']
-        # Add output_wav=True to default params
-        params = {**config, 'output_wav': True}
+        params = {**config}  # Remove hardcoded output_wav
         params.pop('input', None)
         params.pop('segments', None)
         
@@ -59,6 +58,7 @@ def process_yaml_config(config):
                 segment['start_time'],
                 segment['end_time']
             )
+            params['output_wav'] = segment.get('output_wav', '')  # Get output_wav from segment
             
             result = process_input(
                 input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
@@ -203,8 +203,8 @@ def main():
     parser.add_argument(
         "--output_wav",
         "-ow",
-        action="store_true",
-        help="Save the segmented WAV file"
+        default="",
+        help="Filename for saving the segmented WAV (optional)",
     )
     parser.add_argument(
         "--start_time", "-st",
@@ -256,7 +256,7 @@ def main():
         'base_url': args.base_url or config.get('base_url', 'http://localhost:11434'),
         'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3-turbo'),
         'timestamp': parse_timestamp(args.start_time, args.end_time) if args.start_time and args.end_time else None,
-        'output_wav': args.output_wav or config.get('output_wav', False),
+        'output_wav': args.output_wav or config.get('output_wav', ''),
     }
 
     # If --gui is specified, run main.py to launch the GUI

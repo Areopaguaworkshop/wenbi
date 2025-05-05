@@ -35,7 +35,7 @@ def process_input(
     base_url="http://localhost:11434",
     transcribe_model="large-v3",
     timestamp=None,  # Add timestamp parameter
-    output_wav=False,  # Add output_wav parameter
+    output_wav="",  # Change to string parameter
 ):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
@@ -58,12 +58,12 @@ def process_input(
     # Step 1: Convert input to WAV file with segment extraction
     try:
         if url:
-            file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp)
+            file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
         elif file_path:
             # Use extract_audio_segment for all audio/video files
             if file_path.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v", 
                                          ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".webm", ".opus")):
-                file_path = extract_audio_segment(file_path, timestamp, out_dir)
+                file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
             # Note: subtitle files don't need conversion
     except Exception as e:
         print(f"Error in Step 1 (Converting to WAV): {e}")

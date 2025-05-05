@@ -238,7 +238,7 @@ def parse_timestamp(start_time=None, end_time=None):
         raise ValueError("Invalid time format. Use HH:MM:SS")
 
 
-def extract_audio_segment(audio_path, timestamp=None, output_dir=None):
+def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wav=""):
     """
     Extract full audio or segment using moviepy.
     
@@ -246,6 +246,7 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None):
         audio_path (str): Path to input audio/video file
         timestamp (dict, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format
         output_dir (str, optional): Output directory for the extracted audio
+        output_wav (str, optional): Custom filename for the output WAV file
     """
     if output_dir is None:
         output_dir = os.path.dirname(audio_path)
@@ -268,7 +269,13 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None):
             
             # Extract segment
             audio = audio.subclipped(start, end)
-            output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
+            if output_wav:
+                # Remove .wav extension if present in output_wav
+                output_wav = os.path.splitext(output_wav)[0]
+                output_path = os.path.join(output_dir, f"{output_wav}.wav")
+            else:
+                # Use default timestamp-based filename
+                output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
         else:
             output_path = os.path.join(output_dir, f"{base_name}.wav")
         
