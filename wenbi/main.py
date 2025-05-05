@@ -1,9 +1,8 @@
 from wenbi.utils import (
     transcribe,
     parse_subtitle,
-    video_to_audio,
+    extract_audio_segment,  # replace video_to_audio with extract_audio_segment
     language_detect,
-    audio_wav,
     download_audio,
 )
 from wenbi.model import rewrite, translate
@@ -36,6 +35,7 @@ def process_input(
     base_url="http://localhost:11434",
     transcribe_model="large-v3",
     timestamp=None,  # Add timestamp parameter
+    output_wav=False,  # Add output_wav parameter
 ):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
@@ -55,26 +55,15 @@ def process_input(
     if not file_path and not url:
         return "Error: No input provided", None, None, None
 
-    # Step 1: Convert input to WAV file
+    # Step 1: Convert input to WAV file with segment extraction
     try:
         if url:
             file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp)
         elif file_path:
-            _, ext = os.path.splitext(file_path)
-            ext = ext.lower()
-            if ext in {".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v"}:
-                file_path = video_to_audio(file_path, output_dir=out_dir)
-            elif ext in {
-                ".mp3",
-                ".wav",
-                ".flac",
-                ".aac",
-                ".ogg",
-                ".m4a",
-                ".webm",
-                ".opus",
-            }:
-                file_path = audio_wav(file_path, output_dir=out_dir, timestamp=timestamp)
+            # Use extract_audio_segment for all audio/video files
+            if file_path.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v", 
+                                         ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".webm", ".opus")):
+                file_path = extract_audio_segment(file_path, timestamp, out_dir)
             # Note: subtitle files don't need conversion
     except Exception as e:
         print(f"Error in Step 1 (Converting to WAV): {e}")

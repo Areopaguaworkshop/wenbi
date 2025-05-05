@@ -204,34 +204,6 @@ def download_audio(url, output_dir=None, timestamp=None):
         raise Exception(f"Error downloading audio: {str(e)}")
 
 
-def video_to_audio(video_path, output_dir=None):
-    """
-    Extracts audio from a video file and converts it to WAV format.
-
-    Args:
-        video_path (str): Path to the video file.
-        output_dir (str, optional): Directory to save the audio file. Defaults to the current working directory.
-
-    Returns:
-        str: Path to the extracted WAV audio file.
-    """
-    if output_dir is None:
-        output_dir = os.getcwd()
-
-    base_name = os.path.splitext(os.path.basename(video_path))[0]
-    audio_path = os.path.join(output_dir, f"{base_name}.wav")
-
-    try:
-        video_clip = VideoFileClip(video_path)
-        video_clip.audio.write_audiofile(
-            audio_path, codec="pcm_s16le"
-        )  # Ensure WAV format
-        video_clip.close()
-        return audio_path
-    except Exception as e:
-        raise Exception(f"Error extracting audio from video: {e}")
-
-
 def language_detect(file_path, detected_lang=None):
     """
     Detects the language of a text file using langdetect.
@@ -267,50 +239,48 @@ def parse_timestamp(start_time=None, end_time=None):
 
 
 def extract_audio_segment(audio_path, timestamp=None, output_dir=None):
-    """Extract audio segment between timestamps if provided, otherwise return original path."""
-    if not timestamp:
-        return audio_path
-        
-    if output_dir is None:
-        output_dir = os.path.dirname(audio_path)
-        
-    start_time, end_time = timestamp
-    base_name = os.path.splitext(os.path.basename(audio_path))[0]
-    output_path = os.path.join(output_dir, f"{base_name}_{start_time}-{end_time}.wav")
-    
-    audio = AudioSegment.from_wav(audio_path)
-    segment = audio[start_time*1000:end_time*1000]  # Convert to milliseconds
-    segment.export(output_path, format="wav")
-    return output_path
-
-
-def audio_wav(audio_path, output_dir=None, timestamp=None):
     """
-    Convert any audio file to WAV format and optionally extract a segment.
+    Extract full audio or segment using moviepy.
     
     Args:
-        audio_path (str): Path to the input audio file
-        output_dir (str, optional): Directory to save the WAV file
-        timestamp (tuple, optional): (start_seconds, end_seconds) for extraction
+        audio_path (str): Path to input audio/video file
+        timestamp (dict, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format
+        output_dir (str, optional): Output directory for the extracted audio
     """
     if output_dir is None:
         output_dir = os.path.dirname(audio_path)
-
+    
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
-    wav_path = os.path.join(output_dir, f"{base_name}.wav")
-
-    # Skip conversion if file is already WAV
-    if audio_path.lower().endswith(".wav"):
-        return audio_path
-
+    
     try:
-        audio_clip = AudioFileClip(audio_path)
-        audio_clip.write_audiofile(
-            wav_path, codec="pcm_s16le")  # PCM format for WAV
-        audio_clip.close()
+        # Use VideoFileClip first to handle both video and audio files
+        try:
+            clip = VideoFileClip(audio_path)
+            audio = clip.audio
+        except:
+            # If not video, try loading as audio
+            audio = AudioFileClip(audio_path)
         
         if timestamp:
-            return extract_audio_segment(wav_path, timestamp, output_dir)
-        return wav_path
+            # Convert HH:MM:SS to seconds
+            start = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['start'].split(':')))
+            end = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['end'].split(':')))
+            
+            # Extract segment
+            audio = audio.subclipped(start, end)
+            output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
+        else:
+            output_path = os.path.join(output_dir, f"{base_name}.wav")
+        
+        # Write WAV file
+        audio.write_audiofile(output_path, codec='pcm_s16le')
+        
+        # Clean up
+        audio.close()
+        if 'clip' in locals():
+            clip.close()
+            
+        return output_path
+        
     except Exception as e:
-        raise Exception(f"Error converting audio to WAV: {e}")
+        raise Exception(f"Error extracting audio: {e}")

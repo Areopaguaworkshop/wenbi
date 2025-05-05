@@ -48,10 +48,13 @@ def process_yaml_config(config):
     # Handle single input with segments
     if 'input' in config and 'segments' in config:
         input_path = config['input']
+        # Add output_wav=True to default params
+        params = {**config, 'output_wav': True}
+        params.pop('input', None)
+        params.pop('segments', None)
+        
         for segment in config['segments']:
-            params = {**config}
-            params.pop('input', None)
-            params.pop('segments', None)
+            # Process each segment
             params['timestamp'] = parse_timestamp(
                 segment['start_time'],
                 segment['end_time']
@@ -65,7 +68,14 @@ def process_yaml_config(config):
             
             if result[0] and result[3]:
                 outputs.append((segment.get('title', result[3]), result[1] or result[0]))
-    
+        
+        # Combine outputs into single file
+        if outputs:
+            output_dir = config.get('output_dir', '')
+            base_name = os.path.splitext(os.path.basename(input_path))[0]
+            final_output = combine_markdown_files(outputs, output_dir, f"{base_name}_combined.md")
+            print(f"Combined output saved to: {final_output}")
+            
     # Handle multiple inputs with segments
     if 'inputs' in config:
         for input_config in config['inputs']:
@@ -191,6 +201,12 @@ def main():
         help="Whisper model size for transcription (default: large-v3)",
     )
     parser.add_argument(
+        "--output_wav",
+        "-ow",
+        action="store_true",
+        help="Save the segmented WAV file"
+    )
+    parser.add_argument(
         "--start_time", "-st",
         default="",
         help="Start time for extraction (format: HH:MM:SS)"
@@ -240,6 +256,7 @@ def main():
         'base_url': args.base_url or config.get('base_url', 'http://localhost:11434'),
         'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3-turbo'),
         'timestamp': parse_timestamp(args.start_time, args.end_time) if args.start_time and args.end_time else None,
+        'output_wav': args.output_wav or config.get('output_wav', False),
     }
 
     # If --gui is specified, run main.py to launch the GUI

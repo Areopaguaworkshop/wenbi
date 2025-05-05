@@ -1,5 +1,6 @@
 output_dir: "./output"
 transcribe_model: "large-v3"
+output_wav: true
 input: "/home/ajiap/Documents/GCDFL-shared/Ware2-18-2025-05-02-Liturgy2.mp4"
 segments:
           - start_time: "00:01:42"
