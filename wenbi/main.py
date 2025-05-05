@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def process_input(
     file_path=None,
     url="",
-    language="",
+    transcribe_lang="",  # renamed from 'language'
     rewrite_llm="",
     translate_llm="",
     multi_language=False,
@@ -35,6 +35,7 @@ def process_input(
     temperature=0.1,
     base_url="http://localhost:11434",
     transcribe_model="large-v3",
+    timestamp=None,  # Add timestamp parameter
 ):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
@@ -57,7 +58,7 @@ def process_input(
     # Step 1: Convert input to WAV file
     try:
         if url:
-            file_path = download_audio(url.strip(), output_dir=out_dir)
+            file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp)
         elif file_path:
             _, ext = os.path.splitext(file_path)
             ext = ext.lower()
@@ -73,7 +74,7 @@ def process_input(
                 ".webm",
                 ".opus",
             }:
-                file_path = audio_wav(file_path, output_dir=out_dir)
+                file_path = audio_wav(file_path, output_dir=out_dir, timestamp=timestamp)
             # Note: subtitle files don't need conversion
     except Exception as e:
         print(f"Error in Step 1 (Converting to WAV): {e}")
@@ -97,7 +98,7 @@ def process_input(
             ):
                 vtt_files = {None: file_path}
             else:
-                lang = language if language.strip() else None
+                lang = transcribe_lang if transcribe_lang.strip() else None
                 vtt_file, _ = transcribe(
                     file_path,
                     language=lang,
@@ -166,7 +167,7 @@ def create_interface():
     def process_wrapper(
         file_path,
         url,
-        language,
+        transcribe_lang,  # renamed from 'language'
         rewrite_llm,
         translate_llm,
         multi_language,
@@ -176,7 +177,7 @@ def create_interface():
         return process_input(
             file_path,
             url,
-            language,
+            transcribe_lang,  # pass as transcribe_lang
             rewrite_llm,
             translate_llm,
             multi_lang_bool,

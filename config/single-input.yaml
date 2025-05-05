@@ -1,0 +1,10 @@
+output_dir: "./output"
+transcribe_model: "large-v3"
+input: "/path/to/video.mp4"
+segments:
+    - start_time: "00:01:42"
+      end_time: "00:05:10"
+      title: "First segment"
+    - start_time: "00:07:45"
+      end_time: "00:12:40"
+      title: "Second segment"

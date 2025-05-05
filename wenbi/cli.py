@@ -32,6 +32,66 @@ def combine_markdown_files(outputs, output_dir, final_filename="combined_output.
     return combined_path
 
 
+def parse_timestamp(start_time, end_time):
+    """Parse start and end time strings in the format HH:MM:SS"""
+    try:
+        return {'start': start_time.strip(), 'end': end_time.strip()}
+    except ValueError:
+        print("Error: Invalid timestamp format. Use HH:MM:SS for both start and end times.")
+        sys.exit(1)
+
+
+def process_yaml_config(config):
+    """Process YAML config supporting both single and multiple input formats"""
+    outputs = []
+    
+    # Handle single input with segments
+    if 'input' in config and 'segments' in config:
+        input_path = config['input']
+        for segment in config['segments']:
+            params = {**config}
+            params.pop('input', None)
+            params.pop('segments', None)
+            params['timestamp'] = parse_timestamp(
+                segment['start_time'],
+                segment['end_time']
+            )
+            
+            result = process_input(
+                input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
+                input_path if input_path.startswith(("http://", "https://", "www.")) else "",
+                **params
+            )
+            
+            if result[0] and result[3]:
+                outputs.append((segment.get('title', result[3]), result[1] or result[0]))
+    
+    # Handle multiple inputs with segments
+    if 'inputs' in config:
+        for input_config in config['inputs']:
+            input_path = input_config['input']
+            for segment in input_config.get('segments', []):
+                params = {**config, **input_config}
+                params.pop('inputs', None)
+                params.pop('input', None)
+                params.pop('segments', None)
+                params['timestamp'] = parse_timestamp(
+                    segment['start_time'],
+                    segment['end_time']
+                )
+                
+                result = process_input(
+                    input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
+                    input_path if input_path.startswith(("http://", "https://", "www.")) else "",
+                    **params
+                )
+                
+                if result[0] and result[3]:
+                    outputs.append((segment.get('title', result[3]), result[1] or result[0]))
+    
+    return outputs
+
+
 def main():
     download_all()
     parser = argparse.ArgumentParser(
@@ -49,14 +109,12 @@ def main():
     parser.add_argument("--gui", "-g", action="store_true",
                         help="Launch Gradio GUI")
     parser.add_argument(
-        "--rewrite-llm",
-        "-rlm",
+        "--rewrite_llm",
         default="",
         help="Rewrite LLM model identifier (optional)",
     )
     parser.add_argument(
-        "--translate-llm",
-        "-tlm",
+        "--translate_llm",
         default="",
         help="Translation LLM model identifier (optional)",
     )
@@ -132,6 +190,16 @@ def main():
         ],
         help="Whisper model size for transcription (default: large-v3)",
     )
+    parser.add_argument(
+        "--start_time", "-st",
+        default="",
+        help="Start time for extraction (format: HH:MM:SS)"
+    )
+    parser.add_argument(
+        "--end_time", "-et",
+        default="",
+        help="End time for extraction (format: HH:MM:SS)"
+    )
     args = parser.parse_args()
 
     # Handle config file processing
@@ -139,51 +207,23 @@ def main():
         if not args.config.endswith(('.yml', '.yaml')):
             print("Error: Config file must be a YAML file")
             sys.exit(1)
-            
+
         config = load_config(args.config)
         if not isinstance(config, dict):
             print("Error: Invalid YAML configuration")
             sys.exit(1)
 
-        output_dir = config.get('output_dir', '')
-        inputs = config.get('inputs', [])
-        if not inputs:
-            print("Error: No inputs specified in config file")
-            sys.exit(1)
-
-        # Process each input and collect outputs
-        outputs = []
-        for input_config in inputs:
-            input_path = input_config.get('input', '')
-            if not input_path:
-                continue
-
-            # Merge global config with input-specific config
-            input_params = {**config, **input_config}
-            input_params.pop('inputs', None)  # Remove inputs list from params
-            input_params.pop('input', None) # Remove input from params
-            input_params.pop('title', None) # Remove title from params
-
-            is_url = input_path.startswith(("http://", "https://", "www."))
-            result = process_input(
-                None if is_url else input_path,
-                input_path if is_url else "",
-                **input_params
-            )
-            
-            if result[0] and result[3]:  # If we have output and filename
-                title = input_config.get('title', result[3])
-                outputs.append((title, result[1] or result[0]))
-
+        outputs = process_yaml_config(config)
+        
         if outputs:
-            # Combine all outputs into a single markdown file
+            output_dir = config.get('output_dir', '')
             final_output = combine_markdown_files(outputs, output_dir)
             print(f"Combined output saved to: {final_output}")
         return
 
     # Load config file if provided
     config = load_config(args.config)
-    
+
     # Command line arguments take precedence over config file
     params = {
         'output_dir': args.output_dir or config.get('output_dir', ''),
@@ -199,6 +239,7 @@ def main():
         'temperature': args.temperature or config.get('temperature', 0.1),
         'base_url': args.base_url or config.get('base_url', 'http://localhost:11434'),
         'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3-turbo'),
+        'timestamp': parse_timestamp(args.start_time, args.end_time) if args.start_time and args.end_time else None,
     }
 
     # If --gui is specified, run main.py to launch the GUI

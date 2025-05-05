@@ -8,6 +8,7 @@ from spacy.lang.zh import Chinese
 from spacy.lang.en import English
 import spacy
 from langdetect import detect, detect_langs, LangDetectException
+from pydub import AudioSegment
 
 
 def parse_subtitle(file_path, vtt_file=None):
@@ -160,13 +161,14 @@ def segment(file_path, sentence_count=8):
         return text
 
 
-def download_audio(url, output_dir=None):
+def download_audio(url, output_dir=None, timestamp=None):
     """
     Download audio from a URL and convert it to WAV format.
 
     Args:
         url (str): URL of the video/audio to download
         output_dir (str, optional): Directory to save the downloaded file
+        timestamp (tuple, optional): (start_seconds, end_seconds) for extraction
 
     Returns:
         str: Path to the downloaded WAV file
@@ -193,6 +195,10 @@ def download_audio(url, output_dir=None):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             output_file = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
+            
+            if timestamp:
+                # Extract the specified segment
+                return extract_audio_segment(output_file, timestamp, output_dir)
             return output_file
     except Exception as e:
         raise Exception(f"Error downloading audio: {str(e)}")
@@ -246,16 +252,46 @@ def language_detect(file_path, detected_lang=None):
     return "en"
 
 
-def audio_wav(audio_path, output_dir=None):
-    """
-    Convert any audio file to WAV format using MoviePy.
+def parse_timestamp(start_time=None, end_time=None):
+    """Parse start and end times in HH:MM:SS format to seconds tuple."""
+    if not start_time or not end_time:
+        return None
+    try:
+        def time_to_seconds(time_str):
+            h, m, s = map(int, time_str.split(':'))
+            return h * 3600 + m * 60 + s
+            
+        return (time_to_seconds(start_time), time_to_seconds(end_time))
+    except:
+        raise ValueError("Invalid time format. Use HH:MM:SS")
 
+
+def extract_audio_segment(audio_path, timestamp=None, output_dir=None):
+    """Extract audio segment between timestamps if provided, otherwise return original path."""
+    if not timestamp:
+        return audio_path
+        
+    if output_dir is None:
+        output_dir = os.path.dirname(audio_path)
+        
+    start_time, end_time = timestamp
+    base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    output_path = os.path.join(output_dir, f"{base_name}_{start_time}-{end_time}.wav")
+    
+    audio = AudioSegment.from_wav(audio_path)
+    segment = audio[start_time*1000:end_time*1000]  # Convert to milliseconds
+    segment.export(output_path, format="wav")
+    return output_path
+
+
+def audio_wav(audio_path, output_dir=None, timestamp=None):
+    """
+    Convert any audio file to WAV format and optionally extract a segment.
+    
     Args:
         audio_path (str): Path to the input audio file
-        output_dir (str, optional): Directory to save the WAV file. Defaults to same directory as input.
-
-    Returns:
-        str: Path to the converted WAV file
+        output_dir (str, optional): Directory to save the WAV file
+        timestamp (tuple, optional): (start_seconds, end_seconds) for extraction
     """
     if output_dir is None:
         output_dir = os.path.dirname(audio_path)
@@ -272,6 +308,9 @@ def audio_wav(audio_path, output_dir=None):
         audio_clip.write_audiofile(
             wav_path, codec="pcm_s16le")  # PCM format for WAV
         audio_clip.close()
+        
+        if timestamp:
+            return extract_audio_segment(wav_path, timestamp, output_dir)
         return wav_path
     except Exception as e:
         raise Exception(f"Error converting audio to WAV: {e}")
