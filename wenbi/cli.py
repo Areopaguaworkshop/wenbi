@@ -48,17 +48,26 @@ def process_yaml_config(config):
     # Handle single input with segments
     if 'input' in config and 'segments' in config:
         input_path = config['input']
-        params = {**config}  # Remove hardcoded output_wav
+        params = {**config}
         params.pop('input', None)
         params.pop('segments', None)
         
-        for segment in config['segments']:
-            # Process each segment
-            params['timestamp'] = parse_timestamp(
-                segment['start_time'],
-                segment['end_time']
-            )
-            params['output_wav'] = segment.get('output_wav', '')  # Get output_wav from segment
+        for idx, segment in enumerate(config['segments'], 1):
+            # Make all segment fields optional
+            if not isinstance(segment, dict):
+                continue
+                
+            # Get timestamp if provided, otherwise process whole file
+            if 'start_time' in segment and 'end_time' in segment:
+                params['timestamp'] = parse_timestamp(
+                    segment['start_time'],
+                    segment['end_time']
+                )
+            else:
+                params['timestamp'] = None
+                
+            # Get output_wav if provided
+            params['output_wav'] = segment.get('output_wav', '')
             
             result = process_input(
                 input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
@@ -67,7 +76,9 @@ def process_yaml_config(config):
             )
             
             if result[0] and result[3]:
-                outputs.append((segment.get('title', result[3]), result[1] or result[0]))
+                # Use title if provided, otherwise use generated base_name
+                title = segment.get('title', f"Segment {idx}" if params['timestamp'] else result[3])
+                outputs.append((title, result[1] or result[0]))
         
         # Combine outputs into single file
         if outputs:
@@ -76,19 +87,16 @@ def process_yaml_config(config):
             final_output = combine_markdown_files(outputs, output_dir, f"{base_name}_combined.md")
             print(f"Combined output saved to: {final_output}")
             
-    # Handle multiple inputs with segments
+    # Handle multiple inputs with or without segments
     if 'inputs' in config:
         for input_config in config['inputs']:
             input_path = input_config['input']
-            for segment in input_config.get('segments', []):
+            
+            # If no segments defined, process the entire file
+            if 'segments' not in input_config:
                 params = {**config, **input_config}
                 params.pop('inputs', None)
                 params.pop('input', None)
-                params.pop('segments', None)
-                params['timestamp'] = parse_timestamp(
-                    segment['start_time'],
-                    segment['end_time']
-                )
                 
                 result = process_input(
                     input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
@@ -97,7 +105,41 @@ def process_yaml_config(config):
                 )
                 
                 if result[0] and result[3]:
-                    outputs.append((segment.get('title', result[3]), result[1] or result[0]))
+                    # Use filename as title for full file processing
+                    base_name = os.path.splitext(os.path.basename(input_path))[0]
+                    outputs.append((base_name, result[1] or result[0]))
+                continue
+            
+            # Process segments if they exist
+            for idx, segment in enumerate(input_config.get('segments', []), 1):
+                if not isinstance(segment, dict):
+                    continue
+                    
+                params = {**config, **input_config}
+                params.pop('inputs', None)
+                params.pop('input', None)
+                params.pop('segments', None)
+                
+                # Make timestamp optional
+                if 'start_time' in segment and 'end_time' in segment:
+                    params['timestamp'] = parse_timestamp(
+                        segment['start_time'],
+                        segment['end_time']
+                    )
+                else:
+                    params['timestamp'] = None
+                
+                params['output_wav'] = segment.get('output_wav', '')
+                
+                result = process_input(
+                    input_path if not input_path.startswith(("http://", "https://", "www.")) else None,
+                    input_path if input_path.startswith(("http://", "https://", "www.")) else "",
+                    **params
+                )
+                
+                if result[0] and result[3]:
+                    title = segment.get('title', f"Segment {idx}" if params['timestamp'] else result[3])
+                    outputs.append((title, result[1] or result[0]))
     
     return outputs
 
