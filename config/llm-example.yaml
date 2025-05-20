@@ -1,0 +1,28 @@
+output_dir: "./output"
+transcribe_model: "large-v3"
+
+# For OpenAI GPT-4 translation and rewriting
+rewrite_llm: "openai/gpt-4"
+translate_llm: "openai/gpt-4"
+# For Gemini (Google) model, use:
+# rewrite_llm: "gemini/gemini-pro"
+# translate_llm: "gemini/gemini-pro"
+
+translate_lang: "Chinese"
+rewrite_lang: "Chinese"
+multi_language: false
+chunk_length: 8
+max_tokens: 5000
+timeout: 600
+temperature: 0.2
+
+inputs:
+  - input: "/path/to/your/video.mp4"
+    title: "Example Video"
+    segments:
+      - start_time: "00:00:10"
+        end_time: "00:01:00"
+        title: "First segment"
+      - start_time: "00:01:10"
+        end_time: "00:02:00"
+        title: "Second segment"

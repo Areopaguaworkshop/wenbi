@@ -3,6 +3,49 @@ import os
 from wenbi.utils import segment
 
 
+def get_lm_config(model_string, base_url=None):
+    """
+    Determine provider and return config dict for dspy.LM.
+    Supports: ollama, openai, gemini (google-genai)
+    """
+    if not model_string:
+        # Default to Ollama
+        return {
+            "base_url": "http://localhost:11434",
+            "model": "ollama/qwen3",
+        }
+    parts = model_string.strip().split("/")
+    provider = parts[0].lower() if parts else ""
+    if provider == "ollama":
+        return {
+            "base_url": base_url or "http://localhost:11434",
+            "model": model_string,
+        }
+    elif provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set.")
+        return {
+            "base_url": base_url or "https://api.openai.com/v1",
+            "model": model_string.replace("openai/", ""),
+            "api_key": api_key,
+        }
+    elif provider == "gemini":
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY_JSON")
+        if not api_key:
+            raise ValueError(
+                "GOOGLE_API_KEY or GOOGLE_API_KEY_JSON environment variable not set."
+            )
+        return {
+            "base_url": base_url or "https://generativelanguage.googleapis.com/v1beta",
+            "model": model_string.replace("gemini/", ""),
+            "api_key": api_key,
+        }
+    else:
+        # Unknown provider, fallback to user input
+        return {"base_url": base_url, "model": model_string}
+
+
 def is_ollama(model_string):
     """
     Check the model_string (if provided) for the provider.
@@ -49,18 +92,12 @@ def translate(
     segmented_text = segment(vtt_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
 
-    # Determine final base_url based on model string if user provided an llm option.
     model_id = llm if llm else "ollama/qwen3"
-    checked_url = is_ollama(model_id)
-    final_base_url = checked_url if checked_url is not None else None
-
-    lm = dspy.LM(
-        base_url=final_base_url,
-        model=model_id,
-        max_tokens=max_tokens,
-        timeout_s=timeout,
-        temperature=temperature,
-    )
+    lm_config = get_lm_config(model_id, base_url=base_url)
+    lm_config["max_tokens"] = max_tokens
+    lm_config["timeout_s"] = timeout
+    lm_config["temperature"] = temperature
+    lm = dspy.LM(**lm_config)
     dspy.configure(lm=lm)
 
     class Translate(dspy.Signature):
@@ -76,9 +113,7 @@ def translate(
         if para.strip():
             response = translator(english_text=para)
             translated_pairs.append(
-                f"# English\n{para}\n\n# {translate_language}\n{
-                    response.translated_text
-                }\n\n---\n"
+                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
             )
 
     markdown_content = "\n".join(translated_pairs)
@@ -118,36 +153,26 @@ def rewrite(
     paragraphs = segmented_text.split("\n\n")
 
     model_id = llm if llm else "ollama/qwen3"
-    checked_url = is_ollama(model_id)
-    final_base_url = checked_url if checked_url is not None else None
-
-    lm = dspy.LM(
-        base_url=final_base_url,
-        model=model_id,
-        max_tokens=max_tokens,
-        timeout_s=timeout,
-        temperature=temperature,
-    )
+    lm_config = get_lm_config(model_id, base_url=base_url)
+    lm_config["max_tokens"] = max_tokens
+    lm_config["timeout_s"] = timeout
+    lm_config["temperature"] = temperature
+    lm = dspy.LM(**lm_config)
     dspy.configure(lm=lm)
 
     rewritten_paragraphs = []
-    # Loop over paragraphs and rewrite each individually
     for para in paragraphs:
-
         class ParaRewrite(dspy.Signature):
             """
-            Rewrite this text in {rewrite_lang}, add punctuation, converting from spoken to written form
-            while preserving the meaning. Ensure the rewritten text is at least 95%
-            of the original length.
+            Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
+            while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
             """
-
             text: str = dspy.InputField(
                 desc=f"Spoken text to rewrite in {rewrite_lang}"
             )
             rewritten: str = dspy.OutputField(
                 desc=f"Rewritten paragraph in {rewrite_lang}"
             )
-
         rewrite = dspy.ChainOfThought(ParaRewrite)
         response = rewrite(text=para)
         rewritten_paragraphs.append(response.rewritten)
