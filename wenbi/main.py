@@ -102,7 +102,16 @@ def process_input(
     # Step 3: Process VTT file(s) based on language detection
     final_outputs = {}
     try:
-        for speaker, vtt_file in vtt_files.items():
+        # Defensive: handle both dict and list (or single file)
+        if isinstance(vtt_files, dict):
+            vtt_iter = vtt_files.items()
+        elif isinstance(vtt_files, list):
+            vtt_iter = enumerate(vtt_files)
+        else:
+            # fallback: treat as single file
+            vtt_iter = [(None, vtt_files)]
+
+        for speaker, vtt_file in vtt_iter:
             if not multi_language:
                 base_name = os.path.splitext(os.path.basename(vtt_file))[0]
                 csv_file = os.path.join(out_dir, f"{base_name}.csv")
@@ -111,8 +120,7 @@ def process_input(
                 print(f"CSV file '{csv_file}' created successfully.")
 
             detected_lang = language_detect(vtt_file)
-            print(f"Detected language for {
-                  speaker or 'input'}: {detected_lang}")
+            print(f"Detected language for {speaker or 'input'}: {detected_lang}")
 
             if detected_lang == "zh" and translate_lang.lower() == "chinese":
                 output = rewrite(
