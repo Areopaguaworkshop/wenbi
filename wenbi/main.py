@@ -60,10 +60,11 @@ def process_input(
         if url:
             file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
         elif file_path:
-            # Use extract_audio_segment for all audio/video files
-            if file_path.lower().endswith((".mp4", ".avi", ".mov", ".mkv", ".flv", ".wmv", ".m4v", 
-                                         ".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".webm", ".opus")):
+            # Use extract_audio_segment for all audio/video files except .wav
+            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', 
+                                         '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
                 file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
+            # If .wav, do nothing (already correct format)
             # Note: subtitle files don't need conversion
     except Exception as e:
         print(f"Error in Step 1 (Converting to WAV): {e}")

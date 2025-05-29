@@ -161,7 +161,7 @@ def segment(file_path, sentence_count=8):
         return text
 
 
-def download_audio(url, output_dir=None, timestamp=None):
+def download_audio(url, output_dir=None, timestamp=None, output_wav=None):
     """
     Download audio from a URL and convert it to WAV format.
 
@@ -169,6 +169,7 @@ def download_audio(url, output_dir=None, timestamp=None):
         url (str): URL of the video/audio to download
         output_dir (str, optional): Directory to save the downloaded file
         timestamp (tuple, optional): (start_seconds, end_seconds) for extraction
+        output_wav (str, optional): Custom filename for the output WAV file
 
     Returns:
         str: Path to the downloaded WAV file
@@ -178,6 +179,13 @@ def download_audio(url, output_dir=None, timestamp=None):
     if output_dir is None:
         output_dir = os.getcwd()
 
+    # If output_wav is provided, use it as the output filename (without extension)
+    if output_wav:
+        output_wav = os.path.splitext(output_wav)[0]  # Remove extension if present
+        outtmpl = os.path.join(output_dir, f"{output_wav}.%(ext)s")
+    else:
+        outtmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
+
     ydl_opts = {
         "format": "bestaudio/best",
         "postprocessors": [
@@ -186,7 +194,7 @@ def download_audio(url, output_dir=None, timestamp=None):
                 "preferredcodec": "wav",
             }
         ],
-        "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
+        "outtmpl": outtmpl,
         "quiet": False,
         "no_warnings": True,
     }
@@ -194,7 +202,10 @@ def download_audio(url, output_dir=None, timestamp=None):
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            output_file = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
+            if output_wav:
+                output_file = os.path.join(output_dir, f"{output_wav}.wav")
+            else:
+                output_file = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
             
             if timestamp:
                 # Extract the specified segment
