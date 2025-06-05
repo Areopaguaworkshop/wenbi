@@ -201,25 +201,41 @@ def academic(
     base_url="http://localhost:11434",
 ):
     """
-    Rewrites text in academic style by first segmenting the file into paragraphs.
-
-    Args:
-        file_path (str): Path to the input file
-        output_dir (str, optional): Output directory
-        llm (str): LLM model identifier
-        academic_lang (str): Target language for academic writing (default: English)
-        chunk_length (int): Number of sentences per chunk for segmentation
-        max_tokens (int): Maximum number of tokens for the LLM
-        timeout (int): Timeout for the LLM in seconds
-        temperature (float): Temperature for the LLM
-        base_url (str): Base URL for the LLM
-
-    Returns:
-        str: The academic rewritten text, and saves to file if output_dir is provided
+    Rewrites text in academic style while preserving markdown formatting.
     """
-    segmented_text = segment(file_path, sentence_count=chunk_length)
-    paragraphs = segmented_text.split("\n\n")
+    # Read markdown content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
 
+    # Split content into text blocks while preserving markdown elements
+    # Preserve footnotes, headers, links, and other markdown elements
+    blocks = []
+    current_block = []
+    footnotes = []
+
+    for line in content.split('\n'):
+        # Collect footnotes for later
+        if line.startswith('[^'):
+            footnotes.append(line)
+            continue
+        # Keep headers, links, and other formatting intact
+        if line.startswith(('#', '>', '- ', '* ', '1.')) or line.strip().startswith('|'):
+            if current_block:
+                blocks.append('\n'.join(current_block))
+                current_block = []
+            blocks.append(line)
+        # Handle blank lines as paragraph separators
+        elif not line.strip():
+            if current_block:
+                blocks.append('\n'.join(current_block))
+                current_block = []
+        else:
+            current_block.append(line)
+
+    if current_block:
+        blocks.append('\n'.join(current_block))
+
+    # Setup LLM
     model_id = llm if llm else "ollama/qwen3"
     lm_config = get_lm_config(model_id, base_url=base_url)
     lm_config["max_tokens"] = max_tokens
@@ -228,33 +244,43 @@ def academic(
     lm = dspy.LM(**lm_config)
     dspy.configure(lm=lm)
 
-    academic_paragraphs = []
-    for para in paragraphs:
+    # Process each block
+    academic_blocks = []
+    for block in blocks:
+        if not block.strip():
+            continue
+        # Don't rewrite markdown formatting elements
+        if block.startswith(('#', '>', '- ', '* ', '1.')) or block.strip().startswith('|'):
+            academic_blocks.append(block)
+            continue
+
         class AcademicRewrite(dspy.Signature):
             """
             Rewrite this text in formal academic style in {academic_lang}. Focus on:
             1. Using scholarly vocabulary and formal language
-            2. keep the original meaning intact and 96% of same length of words. 
-            3. Do not change the citation format.
-            4. Avoiding colloquialisms and informal expressions 
-            5. Ensuring logical flow and academic structure
+            2. Keep the original meaning intact and 96% of same length of words
+            3. Preserve any markdown formatting, citations, and references
+            4. Avoid colloquialisms and informal expressions
+            5. Ensure logical flow and academic structure
             """
-            text: str = dspy.InputField(
-                desc=f"Text to rewrite in academic {academic_lang}"
-            )
-            academic: str = dspy.OutputField(
-                desc=f"Academic rewritten text in {academic_lang}"
-            )
-            
+            text: str = dspy.InputField(desc=f"Text to rewrite in academic {academic_lang}")
+            academic: str = dspy.OutputField(desc=f"Academic rewritten text in {academic_lang}")
+        
         academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
-        response = academic_rewrite(text=para)
-        academic_paragraphs.append(response.academic)
+        response = academic_rewrite(text=block)
+        academic_blocks.append(response.academic)
 
-    academic_text = "\n\n".join(academic_paragraphs)
+    # Combine processed blocks with preserved formatting
+    academic_text = '\n\n'.join(academic_blocks)
+    
+    # Append footnotes at the end if any
+    if footnotes:
+        academic_text += '\n\n' + '\n'.join(footnotes)
+
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_academic.md")
-        with open(out_file, "w", encoding="utf-8") as f:
+        with open(out_file, 'w', encoding='utf-8') as f:
             f.write(academic_text)
     else:
         out_file = None
@@ -273,26 +299,44 @@ def process_docx(
     temperature=0.1,
     base_url="http://localhost:11434",
 ):
+    """Process a docx file with multiple outputs:
+    1. Original markdown
+    2. Academic rewrite docx
+    3. Academic rewrite markdown
+    4. Comparison markdown (redlines)
+    5. Track changes docx (pandoc)
     """
-    Process a docx file by converting to text, applying academic rewrite, and saving back to docx.
+    from docx import Document
+    import subprocess
+    from redlines import Redlines
 
-    Args:
-        file_path (str): Path to the input docx file
-        output_dir (str, optional): Output directory
-        llm (str): LLM model identifier
-        academic_lang (str): Target language for academic writing
-        chunk_length (int): Number of sentences per chunk
-        max_tokens (int): Maximum tokens for LLM
-        timeout (int): Timeout in seconds
-        temperature (float): Temperature for LLM
-        base_url (str): Base URL for LLM
+    if not output_dir:
+        output_dir = os.path.dirname(file_path)
+    os.makedirs(output_dir, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
 
-    Returns:
-        tuple: (str, str) - Markdown content and path to the generated docx file
-    """
-    # Process with academic rewrite
+    # 1. Convert original to markdown using pandoc to preserve footnotes
+    original_md = os.path.join(output_dir, f"{base_name}_original.md")
+    try:
+        subprocess.run([
+            'pandoc',
+            '-f', 'docx',
+            '-t', 'markdown',
+            '--wrap=none',
+            '--markdown-headings=atx',
+            '--reference-links',
+            file_path,
+            '-o', original_md
+        ], check=True)
+    except subprocess.CalledProcessError:
+        # Fallback to simple conversion if pandoc fails
+        doc = Document(file_path)
+        with open(original_md, 'w', encoding='utf-8') as f:
+            f.write('\n\n'.join(p.text for p in doc.paragraphs if p.text.strip()))
+
+    # 2. Generate academic rewrite using original markdown as input
     academic_text = academic(
-        file_path,
+        original_md,  # Changed from file_path to original_md
         output_dir=output_dir,
         llm=llm,
         academic_lang=academic_lang,
@@ -303,19 +347,62 @@ def process_docx(
         base_url=base_url,
     )
 
-    if output_dir:
-        from docx import Document
-        # Create new docx with academic text
-        new_doc = Document()
-        for para in academic_text.split('\n\n'):
-            if para.strip():
-                new_doc.add_paragraph(para.strip())
+    # 3. Save academic text as markdown (using pandoc for conversion)
+    academic_docx = os.path.join(output_dir, f"{base_name}_academic.docx")
+    new_doc = Document()
+    for para in academic_text.split('\n\n'):
+        if para.strip():
+            new_doc.add_paragraph(para.strip())
+    new_doc.save(academic_docx)
 
-        # Save the new docx
-        base_name = os.path.splitext(os.path.basename(file_path))[0]
-        docx_out = os.path.join(output_dir, f"{base_name}_academic.docx")
-        new_doc.save(docx_out)
-    else:
-        docx_out = None
+    # Convert academic docx to markdown using pandoc
+    academic_md = os.path.join(output_dir, f"{base_name}_academic.md")
+    try:
+        subprocess.run([
+            'pandoc',
+            '-f', 'docx',
+            '-t', 'markdown',
+            '--wrap=none',
+            '--markdown-headings=atx',
+            '--reference-links',
+            academic_docx,
+            '-o', academic_md
+        ], check=True)
+    except subprocess.CalledProcessError:
+        with open(academic_md, 'w', encoding='utf-8') as f:
+            f.write(academic_text)
 
-    return academic_text, docx_out
+    # 4. Generate comparison markdown using redlines
+    compare_md = os.path.join(output_dir, f"{base_name}_compare.md")
+    with open(original_md, 'r', encoding='utf-8') as f:
+        original_text = f.read()
+    diff = Redlines(original_text, academic_text)
+    with open(compare_md, 'w', encoding='utf-8') as f:
+        f.write("# Document Comparison\n\n")
+        f.write(f"**Original:** {base_name}\n")
+        f.write(f"**Academic Rewrite:** {base_name}_academic\n\n")
+        f.write("## Changes\n\n")
+        f.write(diff.output_markdown)
+
+    # 5. Generate track changes docx using pandoc
+    track_changes_docx = os.path.join(output_dir, f"{base_name}_track_changes.docx")
+    try:
+        subprocess.run([
+            'pandoc',
+            '--track-changes=all',
+            '-f', 'markdown',
+            '-t', 'docx',
+            '-o', track_changes_docx,
+            compare_md
+        ], check=True)
+    except subprocess.CalledProcessError:
+        print("Warning: Failed to generate track changes docx. Is pandoc installed?")
+        track_changes_docx = None
+
+    return {
+        'original_md': original_md,
+        'academic_docx': academic_docx,
+        'academic_md': academic_md,
+        'compare_md': compare_md,
+        'track_changes_docx': track_changes_docx
+    }

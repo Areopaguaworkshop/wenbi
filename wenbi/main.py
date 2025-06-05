@@ -60,7 +60,7 @@ def process_input(
     try:
         # Handle docx files
         if file_path and file_path.lower().endswith('.docx'):
-            result, docx_out = process_docx(
+            outputs = process_docx(
                 file_path,
                 output_dir=out_dir,
                 llm=rewrite_llm,
@@ -71,7 +71,12 @@ def process_input(
                 temperature=temperature,
                 base_url=base_url,
             )
-            return result, docx_out, None, os.path.splitext(os.path.basename(file_path))[0]
+            return (
+                outputs['academic_md'],  # Primary output
+                outputs['academic_docx'],  # Academic docx
+                outputs['compare_md'],  # Comparison markdown
+                os.path.splitext(os.path.basename(file_path))[0]  # Base filename
+            )
 
         if url:
             file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
