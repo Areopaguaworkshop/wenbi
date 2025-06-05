@@ -187,3 +187,76 @@ def rewrite(
         out_file = None
 
     return rewritten_text
+
+
+def academic(
+    file_path,
+    output_dir=None,
+    llm="",
+    academic_lang="English",
+    chunk_length=8,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    base_url="http://localhost:11434",
+):
+    """
+    Rewrites text in academic style by first segmenting the file into paragraphs.
+
+    Args:
+        file_path (str): Path to the input file
+        output_dir (str, optional): Output directory
+        llm (str): LLM model identifier
+        academic_lang (str): Target language for academic writing (default: English)
+        chunk_length (int): Number of sentences per chunk for segmentation
+        max_tokens (int): Maximum number of tokens for the LLM
+        timeout (int): Timeout for the LLM in seconds
+        temperature (float): Temperature for the LLM
+        base_url (str): Base URL for the LLM
+
+    Returns:
+        str: The academic rewritten text, and saves to file if output_dir is provided
+    """
+    segmented_text = segment(file_path, sentence_count=chunk_length)
+    paragraphs = segmented_text.split("\n\n")
+
+    model_id = llm if llm else "ollama/qwen3"
+    lm_config = get_lm_config(model_id, base_url=base_url)
+    lm_config["max_tokens"] = max_tokens
+    lm_config["timeout_s"] = timeout
+    lm_config["temperature"] = temperature
+    lm = dspy.LM(**lm_config)
+    dspy.configure(lm=lm)
+
+    academic_paragraphs = []
+    for para in paragraphs:
+        class AcademicRewrite(dspy.Signature):
+            """
+            Rewrite this text in formal academic style in {academic_lang}. Focus on:
+            1. Using scholarly vocabulary and formal language
+            2. keep the original meaning intact and 96% of same length of words. 
+            3. Do not change the citation format.
+            4. Avoiding colloquialisms and informal expressions 
+            5. Ensuring logical flow and academic structure
+            """
+            text: str = dspy.InputField(
+                desc=f"Text to rewrite in academic {academic_lang}"
+            )
+            academic: str = dspy.OutputField(
+                desc=f"Academic rewritten text in {academic_lang}"
+            )
+            
+        academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
+        response = academic_rewrite(text=para)
+        academic_paragraphs.append(response.academic)
+
+    academic_text = "\n\n".join(academic_paragraphs)
+    if output_dir:
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        out_file = os.path.join(output_dir, f"{base_name}_academic.md")
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(academic_text)
+    else:
+        out_file = None
+
+    return academic_text
