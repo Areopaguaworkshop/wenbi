@@ -186,6 +186,12 @@ def main():
         help="Target language for rewriting (default: Chinese)",
     )
     parser.add_argument(
+        "--academic-lang",
+        "-a",
+        default="English",
+        help="Target language for academic writing (default: English)",
+    )
+    parser.add_argument(
         "--multi-language",
         "-m",
         action="store_true",
@@ -290,6 +296,7 @@ def main():
         'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
         'translate_lang': args.translate_lang or config.get('translate_lang', 'Chinese'),
         'rewrite_lang': args.rewrite_lang or config.get('rewrite_lang', 'Chinese'),
+        'academic_lang': args.academic_lang or config.get('academic_lang', 'English'),
         'multi_language': args.multi_language or config.get('multi_language', False),
         'chunk_length': args.chunk_length or config.get('chunk_length', 8),
         'max_tokens': args.max_tokens or config.get('max_tokens', 50000),

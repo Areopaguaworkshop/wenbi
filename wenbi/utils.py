@@ -122,8 +122,14 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
 def segment(file_path, sentence_count=8):
     """Segments a text file into paragraphs by grouping every N sentences."""
     try:
-        vtt_df = parse_subtitle(file_path)
-        text = "。".join(vtt_df["Content"])
+        # Handle docx files
+        if file_path.lower().endswith('.docx'):
+            from docx import Document
+            doc = Document(file_path)
+            text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+        else:
+            vtt_df = parse_subtitle(file_path)
+            text = "。".join(vtt_df["Content"])
 
         # Directly use basic language classes
         if any(char in text for char in "，。？！"):

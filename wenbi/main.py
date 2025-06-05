@@ -5,7 +5,7 @@ from wenbi.utils import (
     language_detect,
     download_audio,
 )
-from wenbi.model import rewrite, translate
+from wenbi.model import rewrite, translate, process_docx
 import os
 import gradio as gr
 import sys
@@ -28,6 +28,7 @@ def process_input(
     translate_lang="Chinese",
     output_dir="",
     rewrite_lang="Chinese",
+    academic_lang="English",
     chunk_length=8,
     max_tokens=50000,
     timeout=3600,
@@ -57,6 +58,21 @@ def process_input(
 
     # Step 1: Convert input to WAV file with segment extraction
     try:
+        # Handle docx files
+        if file_path and file_path.lower().endswith('.docx'):
+            result, docx_out = process_docx(
+                file_path,
+                output_dir=out_dir,
+                llm=rewrite_llm,
+                academic_lang=academic_lang,
+                chunk_length=chunk_length,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                temperature=temperature,
+                base_url=base_url,
+            )
+            return result, docx_out, None, os.path.splitext(os.path.basename(file_path))[0]
+
         if url:
             file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
         elif file_path:

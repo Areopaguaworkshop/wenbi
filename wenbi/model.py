@@ -260,3 +260,62 @@ def academic(
         out_file = None
 
     return academic_text
+
+
+def process_docx(
+    file_path,
+    output_dir=None,
+    llm="",
+    academic_lang="English",
+    chunk_length=8,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    base_url="http://localhost:11434",
+):
+    """
+    Process a docx file by converting to text, applying academic rewrite, and saving back to docx.
+
+    Args:
+        file_path (str): Path to the input docx file
+        output_dir (str, optional): Output directory
+        llm (str): LLM model identifier
+        academic_lang (str): Target language for academic writing
+        chunk_length (int): Number of sentences per chunk
+        max_tokens (int): Maximum tokens for LLM
+        timeout (int): Timeout in seconds
+        temperature (float): Temperature for LLM
+        base_url (str): Base URL for LLM
+
+    Returns:
+        tuple: (str, str) - Markdown content and path to the generated docx file
+    """
+    # Process with academic rewrite
+    academic_text = academic(
+        file_path,
+        output_dir=output_dir,
+        llm=llm,
+        academic_lang=academic_lang,
+        chunk_length=chunk_length,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+        base_url=base_url,
+    )
+
+    if output_dir:
+        from docx import Document
+        # Create new docx with academic text
+        new_doc = Document()
+        for para in academic_text.split('\n\n'):
+            if para.strip():
+                new_doc.add_paragraph(para.strip())
+
+        # Save the new docx
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        docx_out = os.path.join(output_dir, f"{base_name}_academic.docx")
+        new_doc.save(docx_out)
+    else:
+        docx_out = None
+
+    return academic_text, docx_out

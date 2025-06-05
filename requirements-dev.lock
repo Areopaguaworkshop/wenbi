@@ -75,6 +75,8 @@ click==8.1.8
     # via marimo
     # via marker-pdf
     # via pdftext
+    # via redlines
+    # via rich-click
     # via surya-ocr
     # via typer
     # via uvicorn
@@ -255,6 +257,7 @@ lxml==5.4.0
     # via extruct
     # via html-text
     # via lxml-html-clean
+    # via python-docx
 lxml-html-clean==0.4.2
     # via extruct
     # via html-text
@@ -520,6 +523,8 @@ pytest==8.3.5
 python-dateutil==2.9.0.post0
     # via matplotlib
     # via pandas
+python-docx==1.1.2
+    # via wenbi
 python-dotenv==1.1.0
     # via litellm
     # via marker-pdf
@@ -554,6 +559,8 @@ rapidfuzz==3.13.0
 rdflib==7.1.4
     # via extruct
     # via pyrdfa3
+redlines==0.5.2
+    # via wenbi
 referencing==0.36.2
     # via jsonschema
     # via jsonschema-specifications
@@ -576,7 +583,11 @@ requests==2.32.3
 rich==14.0.0
     # via dspy
     # via pyannote-audio
+    # via redlines
+    # via rich-click
     # via typer
+rich-click==1.8.9
+    # via redlines
 rpds-py==0.24.0
     # via jsonschema
     # via referencing
@@ -752,8 +763,10 @@ typing-extensions==4.13.2
     # via pyannote-core
     # via pydantic
     # via pydantic-core
+    # via python-docx
     # via pytorch-lightning
     # via referencing
+    # via rich-click
     # via sqlalchemy
     # via torch
     # via typer
