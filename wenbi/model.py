@@ -1,5 +1,7 @@
 import dspy
 import os
+import re
+from datetime import datetime
 from wenbi.utils import segment
 
 
@@ -200,31 +202,36 @@ def academic(
     temperature=0.1,
     base_url="http://localhost:11434",
 ):
-    """
-    Rewrites text in academic style while preserving markdown formatting.
-    """
+    """Rewrites text in academic style while preserving markdown formatting and footnotes."""
     # Read markdown content
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Split content into text blocks while preserving markdown elements
-    # Preserve footnotes, headers, links, and other markdown elements
+    # Split content into blocks while preserving markdown and footnote elements
     blocks = []
     current_block = []
-    footnotes = []
+    footnotes = {}
+    footnote_order = []  # Maintain footnote order
 
+    # First pass: collect all footnote definitions
     for line in content.split('\n'):
-        # Collect footnotes for later
         if line.startswith('[^'):
-            footnotes.append(line)
-            continue
-        # Keep headers, links, and other formatting intact
-        if line.startswith(('#', '>', '- ', '* ', '1.')) or line.strip().startswith('|'):
+            match = re.match(r'\[\^(\d+)\]:\s*(.*)', line)
+            if match:
+                num, text = match.groups()
+                footnotes[num] = text
+                if num not in footnote_order:
+                    footnote_order.append(num)
+
+    # Second pass: process text while preserving footnote references
+    for line in content.split('\n'):
+        if line.startswith('[^'):
+            continue  # Skip footnote definitions here
+        elif line.startswith(('#', '>', '- ', '* ', '1.')) or line.strip().startswith('|'):
             if current_block:
                 blocks.append('\n'.join(current_block))
                 current_block = []
             blocks.append(line)
-        # Handle blank lines as paragraph separators
         elif not line.strip():
             if current_block:
                 blocks.append('\n'.join(current_block))
@@ -249,33 +256,32 @@ def academic(
     for block in blocks:
         if not block.strip():
             continue
-        # Don't rewrite markdown formatting elements
         if block.startswith(('#', '>', '- ', '* ', '1.')) or block.strip().startswith('|'):
             academic_blocks.append(block)
             continue
 
         class AcademicRewrite(dspy.Signature):
             """
-            Rewrite this text in formal academic style in {academic_lang}. Focus on:
-            1. Using scholarly vocabulary and formal language
-            2. Keep the original meaning intact and 96% of same length of words
-            3. Preserve any markdown formatting, citations, and references
-            4. Avoid colloquialisms and informal expressions
-            5. Ensure logical flow and academic structure
+            Rewrite this text in formal academic style in {academic_lang}. Follow these rules strictly:
+            1. Using scholarly vocabulary and formal academic language (do not change the structure of sentence as possible)
+            2. Maintaining the original meaning and length (97% of original)
+            3. IMPORTANT: Preserve ALL footnote references (e.g., [^1], [^2]) exactly as they appear
             """
             text: str = dspy.InputField(desc=f"Text to rewrite in academic {academic_lang}")
             academic: str = dspy.OutputField(desc=f"Academic rewritten text in {academic_lang}")
-        
+
         academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
         response = academic_rewrite(text=block)
         academic_blocks.append(response.academic)
 
-    # Combine processed blocks with preserved formatting
+    # Combine processed blocks
     academic_text = '\n\n'.join(academic_blocks)
-    
-    # Append footnotes at the end if any
+
+    # Append footnotes in original order
     if footnotes:
-        academic_text += '\n\n' + '\n'.join(footnotes)
+        academic_text += '\n\n'
+        for num in footnote_order:
+            academic_text += f'[^{num}]: {footnotes[num]}\n'
 
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -309,6 +315,7 @@ def process_docx(
     from docx import Document
     import subprocess
     from redlines import Redlines
+    import re
 
     if not output_dir:
         output_dir = os.path.dirname(file_path)
@@ -347,30 +354,55 @@ def process_docx(
         base_url=base_url,
     )
 
-    # 3. Save academic text as markdown (using pandoc for conversion)
-    academic_docx = os.path.join(output_dir, f"{base_name}_academic.docx")
-    new_doc = Document()
-    for para in academic_text.split('\n\n'):
-        if para.strip():
-            new_doc.add_paragraph(para.strip())
-    new_doc.save(academic_docx)
-
-    # Convert academic docx to markdown using pandoc
+    # 3. Save academic text as markdown and convert to docx using pandoc
     academic_md = os.path.join(output_dir, f"{base_name}_academic.md")
+    with open(academic_md, 'w', encoding='utf-8') as f:
+        f.write(academic_text)
+
+    # Convert to docx using pandoc to preserve footnotes
+    academic_docx = os.path.join(output_dir, f"{base_name}_academic.docx")
     try:
         subprocess.run([
             'pandoc',
-            '-f', 'docx',
-            '-t', 'markdown',
-            '--wrap=none',
-            '--markdown-headings=atx',
-            '--reference-links',
-            academic_docx,
-            '-o', academic_md
+            '-f', 'markdown',
+            '-t', 'docx',
+            '--reference-doc', file_path,  # Use original docx as reference for styling
+            '-o', academic_docx,
+            academic_md
         ], check=True)
     except subprocess.CalledProcessError:
-        with open(academic_md, 'w', encoding='utf-8') as f:
-            f.write(academic_text)
+        # Fallback to basic conversion if pandoc fails
+        doc = Document()
+        # Split text and identify footnotes
+        main_text = []
+        footnotes = []
+        current_footnote = None
+
+        for line in academic_text.split('\n'):
+            if line.startswith('[^'):
+                # This is a footnote definition
+                match = re.match(r'\[\^(\d+)\]:\s*(.*)', line)
+                if match:
+                    footnotes.append((int(match.group(1)), match.group(2)))
+            else:
+                # Handle footnote references in main text
+                main_text.append(line)
+
+        # Add main text with footnote references
+        for para in '\n'.join(main_text).split('\n\n'):
+            if para.strip():
+                p = doc.add_paragraph()
+                # Split paragraph to handle footnote references
+                parts = re.split(r'(\[\^\d+\])', para)
+                for part in parts:
+                    if re.match(r'\[\^(\d+)\]', part):
+                        # Add footnote reference
+                        footnote_num = re.search(r'\[\^(\d+)\]', part).group(1)
+                        p.add_run().add_footnote(footnotes[int(footnote_num)-1][1])
+                    else:
+                        p.add_run(part)
+
+        doc.save(academic_docx)
 
     # 4. Generate comparison markdown using redlines
     compare_md = os.path.join(output_dir, f"{base_name}_compare.md")
@@ -384,20 +416,59 @@ def process_docx(
         f.write("## Changes\n\n")
         f.write(diff.output_markdown)
 
-    # 5. Generate track changes docx using pandoc
+    # 5. Generate track changes docx by comparing original and academic markdown
     track_changes_docx = os.path.join(output_dir, f"{base_name}_track_changes.docx")
     try:
+        # First create a temporary markdown file that includes track changes
+        temp_compare_md = os.path.join(output_dir, f"{base_name}_temp_compare.md")
+        with open(original_md, 'r', encoding='utf-8') as f1, \
+             open(academic_md, 'r', encoding='utf-8') as f2:
+            original_text = f1.read()
+            academic_text = f2.read()
+
+        # Use pandoc to create the track changes docx
         subprocess.run([
             'pandoc',
-            '--track-changes=all',
             '-f', 'markdown',
             '-t', 'docx',
+            '--reference-doc', file_path,  # Use original docx for styling
+            '--track-changes=all',
+            '--wrap=none',
+            '--lua-filter', os.path.join(os.path.dirname(__file__), 'track_changes.lua'),  # Custom filter
             '-o', track_changes_docx,
-            compare_md
+            '--metadata', f'author={author}',
+            '--metadata', f'date={datetime.now().strftime("%Y-%m-%d")}',
+            '-V', 'track-changes=true',
+            '-B', original_md,  # Base document
+            academic_md  # Changes to track
         ], check=True)
+
+        # Clean up temporary file
+        if os.path.exists(temp_compare_md):
+            os.remove(temp_compare_md)
+
     except subprocess.CalledProcessError:
-        print("Warning: Failed to generate track changes docx. Is pandoc installed?")
-        track_changes_docx = None
+        print("Warning: Failed to generate track changes docx with pandoc. Creating simplified version...")
+
+        # Fallback: Create a basic track changes docx using python-docx
+        doc = Document(file_path)  # Use original as template
+        doc.add_paragraph('Original Text:', style='Heading 1')
+
+        # Add original text with footnotes
+        original_paras = split_text_preserve_footnotes(original_text)
+        for para in original_paras:
+            p = doc.add_paragraph()
+            add_text_with_footnotes(p, para)
+
+        doc.add_paragraph('Academic Rewrite:', style='Heading 1')
+
+        # Add academic text with footnotes
+        academic_paras = split_text_preserve_footnotes(academic_text)
+        for para in academic_paras:
+            p = doc.add_paragraph()
+            add_text_with_footnotes(p, para)
+
+        doc.save(track_changes_docx)
 
     return {
         'original_md': original_md,
@@ -406,3 +477,41 @@ def process_docx(
         'compare_md': compare_md,
         'track_changes_docx': track_changes_docx
     }
+
+def split_text_preserve_footnotes(text):
+    """Split text into paragraphs while preserving footnote references"""
+    paras = []
+    current = []
+    footnotes = {}
+
+    for line in text.split('\n'):
+        if line.startswith('[^'):
+            # Store footnote definition
+            match = re.match(r'\[\^(\d+)\]:\s*(.*)', line)
+            if match:
+                footnotes[match.group(1)] = match.group(2)
+        elif line.strip():
+            current.append(line)
+        elif current:
+            paras.append(('\n'.join(current), footnotes))
+            current = []
+            footnotes = {}
+
+    if current:
+        paras.append(('\n'.join(current), footnotes))
+
+    return paras
+
+def add_text_with_footnotes(paragraph, content):
+    """Add text to paragraph while properly handling footnote references"""
+    text, footnotes = content
+    parts = re.split(r'(\[\^\d+\])', text)
+
+    for part in parts:
+        if re.match(r'\[\^(\d+)\]', part):
+            # Add footnote reference
+            footnote_num = re.search(r'\[\^(\d+)\]', part).group(1)
+            if footnote_num in footnotes:
+                paragraph.add_run().add_footnote(footnotes[footnote_num])
+        else:
+            paragraph.add_run(part)

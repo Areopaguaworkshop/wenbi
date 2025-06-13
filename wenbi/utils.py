@@ -129,9 +129,14 @@ def segment(file_path, sentence_count=8):
             text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
         else:
             vtt_df = parse_subtitle(file_path)
-            text = "。".join(vtt_df["Content"])
+            # Detect language and join content accordingly
+            detected_lang = language_detect(file_path)
+            if detected_lang == "zh":
+                text = "。".join(vtt_df["Content"])
+            else:
+                text = " ".join(vtt_df["Content"])
 
-        # Directly use basic language classes
+        # Determine language for spaCy model
         if any(char in text for char in "，。？！"):
             nlp = Chinese()
         else:
