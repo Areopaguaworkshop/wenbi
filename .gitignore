@@ -32,6 +32,7 @@ example/**/*
 *.vtt
 *.bin
 *.csv
+*.docx
 
 # Testing
 .tox/
