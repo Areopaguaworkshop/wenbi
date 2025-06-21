@@ -166,8 +166,10 @@ def rewrite(
     for para in paragraphs:
         class ParaRewrite(dspy.Signature):
             """
-            Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
-            while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
+            Rewrite this text in {rewrite_lang} from oral to written.  Follow these rules strictly:
+            1. Correct any basic grammar, punctuation, or usage errors.
+            2. Improve clarity while preserving the original meaning and scholarly tone (trying your best not to change the structure of sentence)
+            3. IMPORTANT: Maintaining the original meaning and length (97% of original)
             """
             text: str = dspy.InputField(
                 desc=f"Spoken text to rewrite in {rewrite_lang}"
@@ -197,7 +199,7 @@ def academic(
     llm="",
     academic_lang="English",
     chunk_length=8,
-    max_tokens=50000,
+    max_tokens=250000,
     timeout=3600,
     temperature=0.1,
     base_url="http://localhost:11434",
@@ -263,9 +265,10 @@ def academic(
         class AcademicRewrite(dspy.Signature):
             """
             Rewrite this text in formal academic style in {academic_lang}. Follow these rules strictly:
-            1. Using scholarly vocabulary and formal academic language (do not change the structure of sentence as possible)
-            2. Maintaining the original meaning and length (97% of original)
-            3. IMPORTANT: Preserve ALL footnote references (e.g., [^1], [^2]) exactly as they appear
+            1. Correct any basic grammar, punctuation, or usage errors.
+            2. Improve clarity while preserving the original meaning and scholarly tone (trying your best not to change the structure of sentence)
+            3. Maintaining the original meaning and length (97% of original)
+            4. IMPORTANT: Preserve ALL footnote references (e.g., [^1], [^2]) exactly as they appear
             """
             text: str = dspy.InputField(desc=f"Text to rewrite in academic {academic_lang}")
             academic: str = dspy.OutputField(desc=f"Academic rewritten text in {academic_lang}")
@@ -354,57 +357,7 @@ def process_docx(
         base_url=base_url,
     )
 
-    # 3. Save academic text as markdown and convert to docx using pandoc
-    academic_md = os.path.join(output_dir, f"{base_name}_academic.md")
-    with open(academic_md, 'w', encoding='utf-8') as f:
-        f.write(academic_text)
-
-    # Convert to docx using pandoc to preserve footnotes
-    academic_docx = os.path.join(output_dir, f"{base_name}_academic.docx")
-    try:
-        subprocess.run([
-            'pandoc',
-            '-f', 'markdown',
-            '-t', 'docx',
-            '--reference-doc', file_path,  # Use original docx as reference for styling
-            '-o', academic_docx,
-            academic_md
-        ], check=True)
-    except subprocess.CalledProcessError:
-        # Fallback to basic conversion if pandoc fails
-        doc = Document()
-        # Split text and identify footnotes
-        main_text = []
-        footnotes = []
-        current_footnote = None
-
-        for line in academic_text.split('\n'):
-            if line.startswith('[^'):
-                # This is a footnote definition
-                match = re.match(r'\[\^(\d+)\]:\s*(.*)', line)
-                if match:
-                    footnotes.append((int(match.group(1)), match.group(2)))
-            else:
-                # Handle footnote references in main text
-                main_text.append(line)
-
-        # Add main text with footnote references
-        for para in '\n'.join(main_text).split('\n\n'):
-            if para.strip():
-                p = doc.add_paragraph()
-                # Split paragraph to handle footnote references
-                parts = re.split(r'(\[\^\d+\])', para)
-                for part in parts:
-                    if re.match(r'\[\^(\d+)\]', part):
-                        # Add footnote reference
-                        footnote_num = re.search(r'\[\^(\d+)\]', part).group(1)
-                        p.add_run().add_footnote(footnotes[int(footnote_num)-1][1])
-                    else:
-                        p.add_run(part)
-
-        doc.save(academic_docx)
-
-    # 4. Generate comparison markdown using redlines
+    # 3. Generate comparison markdown using redlines
     compare_md = os.path.join(output_dir, f"{base_name}_compare.md")
     with open(original_md, 'r', encoding='utf-8') as f:
         original_text = f.read()
@@ -416,66 +369,9 @@ def process_docx(
         f.write("## Changes\n\n")
         f.write(diff.output_markdown)
 
-    # 5. Generate track changes docx by comparing original and academic markdown
-    track_changes_docx = os.path.join(output_dir, f"{base_name}_track_changes.docx")
-    try:
-        # First create a temporary markdown file that includes track changes
-        temp_compare_md = os.path.join(output_dir, f"{base_name}_temp_compare.md")
-        with open(original_md, 'r', encoding='utf-8') as f1, \
-             open(academic_md, 'r', encoding='utf-8') as f2:
-            original_text = f1.read()
-            academic_text = f2.read()
-
-        # Use pandoc to create the track changes docx
-        subprocess.run([
-            'pandoc',
-            '-f', 'markdown',
-            '-t', 'docx',
-            '--reference-doc', file_path,  # Use original docx for styling
-            '--track-changes=all',
-            '--wrap=none',
-            '--lua-filter', os.path.join(os.path.dirname(__file__), 'track_changes.lua'),  # Custom filter
-            '-o', track_changes_docx,
-            '--metadata', f'author={author}',
-            '--metadata', f'date={datetime.now().strftime("%Y-%m-%d")}',
-            '-V', 'track-changes=true',
-            '-B', original_md,  # Base document
-            academic_md  # Changes to track
-        ], check=True)
-
-        # Clean up temporary file
-        if os.path.exists(temp_compare_md):
-            os.remove(temp_compare_md)
-
-    except subprocess.CalledProcessError:
-        print("Warning: Failed to generate track changes docx with pandoc. Creating simplified version...")
-
-        # Fallback: Create a basic track changes docx using python-docx
-        doc = Document(file_path)  # Use original as template
-        doc.add_paragraph('Original Text:', style='Heading 1')
-
-        # Add original text with footnotes
-        original_paras = split_text_preserve_footnotes(original_text)
-        for para in original_paras:
-            p = doc.add_paragraph()
-            add_text_with_footnotes(p, para)
-
-        doc.add_paragraph('Academic Rewrite:', style='Heading 1')
-
-        # Add academic text with footnotes
-        academic_paras = split_text_preserve_footnotes(academic_text)
-        for para in academic_paras:
-            p = doc.add_paragraph()
-            add_text_with_footnotes(p, para)
-
-        doc.save(track_changes_docx)
-
     return {
         'original_md': original_md,
-        'academic_docx': academic_docx,
-        'academic_md': academic_md,
-        'compare_md': compare_md,
-        'track_changes_docx': track_changes_docx
+        'compare_md': compare_md
     }
 
 def split_text_preserve_footnotes(text):

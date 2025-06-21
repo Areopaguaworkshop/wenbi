@@ -72,9 +72,9 @@ def process_input(
                 base_url=base_url,
             )
             return (
-                outputs['academic_md'],  # Primary output
-                outputs['academic_docx'],  # Academic docx
+                outputs['original_md'],  # Primary output
                 outputs['compare_md'],  # Comparison markdown
+                None,  # No CSV file for docx
                 os.path.splitext(os.path.basename(file_path))[0]  # Base filename
             )
 

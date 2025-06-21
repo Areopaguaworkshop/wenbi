@@ -328,8 +328,7 @@ def main():
         **params
     )
     print("Markdown Output:", result[0])
-    print("Markdown File:", result[1])
-    print("CSV File:", result[2])
+    print("Comparison Markdown:", result[1])
     print("Filename (without extension):",
           result[3] if result[3] is not None else "")
 
