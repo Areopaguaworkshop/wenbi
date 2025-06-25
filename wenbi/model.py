@@ -1,7 +1,14 @@
 import dspy
 import os
 import re
+import sys
+import json
+import subprocess
+import traceback
 from datetime import datetime
+from docx import Document
+from redlines import Redlines
+import google.generativeai as genai
 from wenbi.utils import segment
 
 
@@ -28,21 +35,41 @@ def get_lm_config(model_string, base_url=None):
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set.")
         return {
-            "base_url": base_url or "https://api.openai.com/v1",
             "model": model_string.replace("openai/", ""),
             "api_key": api_key,
         }
     elif provider == "gemini":
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY_JSON")
-        if not api_key:
-            raise ValueError(
-                "GOOGLE_API_KEY or GOOGLE_API_KEY_JSON environment variable not set."
-            )
-        return {
-            "base_url": base_url or "https://generativelanguage.googleapis.com/v1beta",
-            "model": model_string.replace("gemini/", ""),
-            "api_key": api_key,
-        }
+        # For Gemini models, use our custom adapter
+        try:
+            # Make sure the required package is installed
+            import google.generativeai
+
+            # Extract model name from the model string
+            model_name = model_string.replace("gemini/", "")
+            print(f"Creating adapter for Gemini model: {model_name}")
+
+            # Create a custom DSPy adapter for Gemini (preferred)
+            # This adapter implements the DSPy LM interface directly
+            try:
+                lm = CustomDSPyGeminiAdapter(
+                    model_name=model_name,
+                    temperature=0.1,
+                    max_tokens=2048
+                )
+                return {"lm": lm}
+            except Exception as adapter_error:
+                print(f"Error creating CustomDSPyGeminiAdapter, falling back to legacy adapter: {adapter_error}")
+                # Fall back to legacy adapter if the DSPy adapter fails
+                adapter = GeminiAdapter(model_name)
+                return {
+                    "model": model_name,
+                    "adapter": adapter,
+                }
+        except ImportError:
+            raise ImportError("Please install Google Generative AI: pip install google-generativeai")
+        except Exception as e:
+            print(f"Error setting up Gemini model: {e}")
+            raise ValueError(f"Failed to initialize Gemini model: {str(e)}")
     else:
         # Unknown provider, fallback to user input
         return {"base_url": base_url, "model": model_string}
@@ -193,10 +220,233 @@ def rewrite(
     return rewritten_text
 
 
+# Custom adapter for Google Gemini
+# Custom DSPy adapter for Gemini models
+class CustomDSPyGeminiAdapter(dspy.LM):
+    def __init__(self, model_name, **kwargs):
+        super().__init__(model=model_name)  # Pass model name to parent class
+        # Using globally imported genai module
+        global genai
+
+        self.model_name = model_name
+        self.kwargs = kwargs
+
+        # First try with API key (preferred method)
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+
+        if self.api_key:
+            # Configure with explicit API key
+            print(f"Using API key authentication for Gemini model: {model_name}")
+            genai.configure(api_key=self.api_key)
+        else:
+            # Set path to application default credentials
+            print(f"No API key found, setting ADC credentials path")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/ajiap/.config/gcloud/application_default_credentials.json"
+
+            # Don't configure genai with project_id as it causes issues
+            # It will use ADC automatically when no API key is provided
+
+        try:
+            self.model = genai.GenerativeModel(model_name)
+            print(f"Successfully initialized Gemini model: {model_name}")
+        except Exception as e:
+            print(f"Error initializing Gemini model: {e}")
+            raise
+
+    def basic_request(self, prompt, **kwargs):
+        """Send a basic completion request to the model."""
+        try:
+            # Process and send the prompt to Gemini
+            generation_config = {
+                "temperature": kwargs.get("temperature", self.kwargs.get("temperature", 0.1)),
+                "top_p": kwargs.get("top_p", 0.95),
+                "top_k": kwargs.get("top_k", 40),
+                "max_output_tokens": kwargs.get("max_tokens", self.kwargs.get("max_tokens", 1024)),
+            }
+
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            ]
+
+            print(f"Sending prompt to Gemini ({len(prompt)} chars)")
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+
+            # Check if response has text property
+            if hasattr(response, 'text'):
+                response_text = response.text
+                print(f"Received valid response from Gemini ({len(response_text)} chars)")
+                return response_text
+            else:
+                print(f"Warning: Response has no text attribute: {response}")
+                return "No response text was generated. Please try again."
+
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Gemini API error: {error_msg}")
+
+            # Check for specific error types
+            if "PERMISSION_DENIED" in error_msg or "Permission denied" in error_msg:
+                return "Error: Permission denied accessing Google Gemini API. Please check your API key or credentials."
+            elif "project" in error_msg and ("not found" in error_msg or "invalid" in error_msg):
+                return "Error: Invalid Google Cloud project. Please check your GOOGLE_CLOUD_PROJECT environment variable."
+            elif "quota" in error_msg:
+                return "Error: Quota exceeded for Google Gemini API. Please try again later."
+            else:
+                return f"Error from Gemini API: {error_msg}"
+
+    def _complete(self, prompt, **kwargs):
+        """Complete a prompt with the Gemini model."""
+        response_text = self.basic_request(prompt, **kwargs)
+
+        # Format response to match DSPy expectations
+        return {
+            "choices": [{
+                "message": {
+                    "content": response_text
+                }
+            }]
+        }
+
+    def generate(self, prompt, **kwargs):
+        """Generate text from a prompt."""
+        response = self._complete(prompt, **kwargs)
+        # Process result for DSPy
+        try:
+            if isinstance(response, dict) and "choices" in response:
+                return response["choices"][0]["message"]["content"]
+            elif isinstance(response, str):
+                return response
+            elif isinstance(response, list) and len(response) > 0:
+                if isinstance(response[0], dict) and "message" in response[0]:
+                    return response[0]["message"].get("content", "No content found")
+                elif isinstance(response[0], str):
+                    return response[0]
+            return "Error processing model response: Unexpected format"
+        except (KeyError, IndexError, TypeError) as e:
+            print(f"Error processing response: {e}, response type: {type(response)}")
+            if isinstance(response, dict):
+                return str(response)
+            elif isinstance(response, list) and len(response) > 0:
+                return str(response[0])
+            return "Error processing model response"
+
+    def __call__(self, prompt, **kwargs):
+        """Make the adapter callable for compatibility with DSPy."""
+        return self._complete(prompt, **kwargs)
+
+# Legacy adapter for backward compatibility
+class GeminiAdapter:
+    def __init__(self, model_name):
+        # Using globally imported genai module
+        global genai
+
+        self.model_name = model_name
+
+        # First try with API key (preferred method)
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+
+        if self.api_key:
+            # Configure with explicit API key
+            print(f"Using API key authentication for Gemini model: {model_name}")
+            genai.configure(api_key=self.api_key)
+        else:
+            # Set path to application default credentials
+            print(f"No API key found, setting ADC credentials path")
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/ajiap/.config/gcloud/application_default_credentials.json"
+
+            # Don't configure genai with project_id as it causes issues
+            # It will use ADC automatically when no API key is provided
+
+        try:
+            self.model = genai.GenerativeModel(model_name)
+            print(f"Successfully initialized Gemini model: {model_name}")
+        except Exception as e:
+            print(f"Error initializing Gemini model: {e}")
+            raise
+
+    def __call__(self, prompt, **kwargs):
+        try:
+            # Process and send the prompt to Gemini
+            generation_config = {
+                "temperature": kwargs.get("temperature", 0.1),
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": kwargs.get("max_tokens", 1024),
+            }
+
+            safety_settings = [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            ]
+
+            print(f"Sending prompt to Gemini ({len(prompt)} chars)")
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+
+            # Check if response has text property
+            if hasattr(response, 'text'):
+                print(f"Received valid response from Gemini ({len(response.text)} chars)")
+                return {
+                    "choices": [{
+                        "message": {
+                            "content": response.text
+                        }
+                    }]
+                }
+            else:
+                print(f"Warning: Response has no text attribute: {response}")
+                # Handle empty or invalid response
+                return {
+                    "choices": [{
+                        "message": {
+                            "content": "No response text was generated. Please try again."
+                        }
+                    }]
+                }
+
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Gemini API error: {error_msg}")
+
+            # Check for specific error types
+            if "PERMISSION_DENIED" in error_msg or "Permission denied" in error_msg:
+                error_response = "Error: Permission denied accessing Google Gemini API. Please check your API key or credentials."
+            elif "project" in error_msg and ("not found" in error_msg or "invalid" in error_msg):
+                error_response = "Error: Invalid Google Cloud project. Please check your GOOGLE_CLOUD_PROJECT environment variable."
+            elif "quota" in error_msg:
+                error_response = "Error: Quota exceeded for Google Gemini API. Please try again later."
+            else:
+                error_response = f"Error from Gemini API: {error_msg}"
+
+            # Return a structured error message
+            return {
+                "choices": [{
+                    "message": {
+                        "content": error_response
+                    }
+                }]
+            }
+
+
+
+
 def academic(
     file_path,
     output_dir=None,
     llm="",
+    academic_llm="",  # Added academic_llm parameter
     academic_lang="English",
     chunk_length=8,
     max_tokens=250000,
@@ -204,7 +454,23 @@ def academic(
     temperature=0.1,
     base_url="http://localhost:11434",
 ):
-    """Rewrites text in academic style while preserving markdown formatting and footnotes."""
+    """Rewrites text in academic style while preserving markdown formatting and footnotes.
+    Returns the academic text without writing to a file unless output_dir is specified."""
+    print(f"DEBUG: academic function called with file_path={file_path}, llm={llm}, academic_llm={academic_llm}")
+
+    # Type checking and defensive coding
+    if not isinstance(file_path, str):
+        print(f"WARNING: file_path is not a string: {type(file_path)}")
+        file_path = str(file_path)
+
+    if not isinstance(llm, str):
+        print(f"WARNING: llm is not a string: {type(llm)}")
+        llm = str(llm) if llm is not None else ""
+
+    if not isinstance(academic_llm, str):
+        print(f"WARNING: academic_llm is not a string: {type(academic_llm)}")
+        academic_llm = str(academic_llm) if academic_llm is not None else ""
+
     # Read markdown content
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -214,6 +480,8 @@ def academic(
     current_block = []
     footnotes = {}
     footnote_order = []  # Maintain footnote order
+    print(f"DEBUG: Content length: {len(content)} characters")
+    print(f"DEBUG: First 100 chars of content: {content[:100]}")
 
     # First pass: collect all footnote definitions
     for line in content.split('\n'):
@@ -244,14 +512,60 @@ def academic(
     if current_block:
         blocks.append('\n'.join(current_block))
 
-    # Setup LLM
-    model_id = llm if llm else "ollama/qwen3"
-    lm_config = get_lm_config(model_id, base_url=base_url)
-    lm_config["max_tokens"] = max_tokens
-    lm_config["timeout_s"] = timeout
-    lm_config["temperature"] = temperature
-    lm = dspy.LM(**lm_config)
-    dspy.configure(lm=lm)
+    # Setup LLM - prefer academic_llm over general llm
+    model_id = academic_llm if academic_llm else (llm if llm else "ollama/qwen3")
+    print(f"DEBUG: Using model_id: {model_id}")
+
+    # Ensure model_id is a string
+    if not isinstance(model_id, str):
+        model_id = str(model_id)
+        print(f"DEBUG: Converted model_id to string: {model_id}")
+
+    # Default to qwen3 if model_id is empty after conversion
+    if not model_id.strip():
+        model_id = "ollama/qwen3"
+        print(f"DEBUG: Using default model_id: {model_id}")
+
+    # For Gemini models, ensure required packages are installed
+    if model_id.startswith("gemini/"):
+        # We already imported google.generativeai at the top of the file
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise ValueError("GOOGLE_API_KEY environment variable not set.")
+
+    # Get LLM configuration and initialize
+    print(f"DEBUG: Getting LLM config for model_id={model_id}")
+    try:
+        lm_config = get_lm_config(model_id, base_url=base_url)
+
+        # If we got a custom LM instance directly, use it
+        if "lm" in lm_config:
+            lm = lm_config["lm"]
+            # Set any extra parameters
+            if hasattr(lm, "kwargs"):
+                lm.kwargs["max_tokens"] = max_tokens
+                lm.kwargs["timeout"] = timeout
+                lm.kwargs["temperature"] = temperature
+        else:
+            # Otherwise configure a standard DSPy LM
+            lm_config["max_tokens"] = max_tokens
+            lm_config["timeout_s"] = timeout
+            lm_config["temperature"] = temperature
+            lm = dspy.LM(**lm_config)
+
+        print(f"DEBUG: LLM config applied: {lm_config}")
+    except Exception as e:
+        print(f"DEBUG: Error getting LLM config: {e}")
+        traceback.print_exc()
+        raise
+
+    try:
+        # Configure DSPy to use this language model
+        dspy.configure(lm=lm)
+        print(f"Successfully configured DSPy with model: {model_id}")
+    except Exception as e:
+        print(f"Error initializing LLM: {e}")
+        traceback.print_exc()
+        raise ValueError(f"Failed to initialize LLM with model {model_id}: {str(e)}")
 
     # Process each block
     academic_blocks = []
@@ -273,9 +587,68 @@ def academic(
             text: str = dspy.InputField(desc=f"Text to rewrite in academic {academic_lang}")
             academic: str = dspy.OutputField(desc=f"Academic rewritten text in {academic_lang}")
 
-        academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
-        response = academic_rewrite(text=block)
-        academic_blocks.append(response.academic)
+        # Monkey patch the parse method in dspy to handle list responses
+        original_parse = dspy.adapters.JsonAdapter.parse
+
+        def safe_parse(self, signature, response):
+            try:
+                # Handle list responses by converting to a dictionary format
+                if isinstance(response, list):
+                    print(f"Converting list response to dictionary format")
+                    if len(response) > 0 and isinstance(response[0], dict):
+                        response = {"choices": [{"message": {"content": json.dumps(response[0])}}]}
+                    else:
+                        response = {"choices": [{"message": {"content": "No valid content found"}}]}
+                return original_parse(self, signature, response)
+            except Exception as e:
+                print(f"Error in parse: {e}")
+                # Return a basic output with all the expected fields
+                return {field: "" for field in signature.output_fields}
+
+        # Apply the monkey patch
+        dspy.adapters.JsonAdapter.parse = safe_parse
+
+        # Create a custom wrapped version of ChainOfThought that handles errors
+        class SafeChainOfThought:
+            def __init__(self, signature_class):
+                self.chain = dspy.ChainOfThought(signature_class)
+                self.max_retries = 2
+
+            def __call__(self, **kwargs):
+                # Get the input text for fallback
+                input_text = kwargs.get('text', '')
+
+                for attempt in range(self.max_retries + 1):
+                    try:
+                        print(f"Academic rewrite attempt {attempt+1}/{self.max_retries+1}")
+
+                        # Call the underlying chain
+                        result = self.chain(**kwargs)
+
+                        # If we have a valid result with academic field, return it
+                        if hasattr(result, 'academic') and result.academic:
+                            return result.academic
+
+                    except Exception as e:
+                        print(f"Error in rewrite attempt {attempt+1}: {e}")
+                        if attempt == self.max_retries:
+                            print("All retry attempts failed")
+
+                # If we got here, all attempts failed - return original text
+                print("Falling back to original text")
+                return input_text
+
+        # Use our safe wrapper
+        safe_academic_rewrite = SafeChainOfThought(AcademicRewrite)
+
+        try:
+            # Process each block with our safe wrapper
+            rewritten_text = safe_academic_rewrite(text=block)
+            academic_blocks.append(rewritten_text)
+        except Exception as e:
+            print(f"Error during academic rewrite: {e}")
+            # Fall back to original text if rewrite fails
+            academic_blocks.append(block)
 
     # Combine processed blocks
     academic_text = '\n\n'.join(academic_blocks)
@@ -286,13 +659,13 @@ def academic(
         for num in footnote_order:
             academic_text += f'[^{num}]: {footnotes[num]}\n'
 
+    # Only write to file if output_dir is explicitly requested
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_academic.md")
         with open(out_file, 'w', encoding='utf-8') as f:
             f.write(academic_text)
-    else:
-        out_file = None
+        print(f"Note: Academic text written to {out_file}")
 
     return academic_text
 
@@ -301,6 +674,7 @@ def process_docx(
     file_path,
     output_dir=None,
     llm="",
+    academic_llm="",  # Added academic_llm parameter
     academic_lang="English",
     chunk_length=8,
     max_tokens=50000,
@@ -308,17 +682,36 @@ def process_docx(
     temperature=0.1,
     base_url="http://localhost:11434",
 ):
-    """Process a docx file with multiple outputs:
+    """Process a docx file with only essential outputs:
     1. Original markdown
-    2. Academic rewrite docx
-    3. Academic rewrite markdown
-    4. Comparison markdown (redlines)
-    5. Track changes docx (pandoc)
+    2. Comparison markdown (redlines)
     """
-    from docx import Document
-    import subprocess
-    from redlines import Redlines
-    import re
+    print(f"DEBUG: process_docx function called with file_path={file_path}, llm={llm}, academic_llm={academic_llm}")
+    print(f"DEBUG: All params: output_dir={output_dir}, academic_lang={academic_lang}, chunk_length={chunk_length}, max_tokens={max_tokens}, timeout={timeout}, temperature={temperature}")
+
+    # Type checking for parameters
+    if not isinstance(file_path, str):
+        print(f"WARNING: file_path is not a string: {type(file_path)}")
+        file_path = str(file_path) if file_path is not None else ""
+
+    if not isinstance(llm, str):
+        print(f"WARNING: llm is not a string: {type(llm)}")
+        llm = str(llm) if llm is not None else ""
+
+    if not isinstance(academic_llm, str):
+        print(f"WARNING: academic_llm is not a string: {type(academic_llm)}")
+        academic_llm = str(academic_llm) if academic_llm is not None else ""
+
+    if not isinstance(chunk_length, int):
+        print(f"WARNING: chunk_length is not an integer: {type(chunk_length)}")
+        try:
+            chunk_length = int(chunk_length)
+        except (ValueError, TypeError):
+            chunk_length = 8
+    # For Gemini models, check if API key is set
+    if (llm and llm.startswith("gemini/")) or (academic_llm and academic_llm.startswith("gemini/")):
+        if not os.getenv("GOOGLE_API_KEY"):
+            raise ValueError("GOOGLE_API_KEY environment variable not set.")
 
     if not output_dir:
         output_dir = os.path.dirname(file_path)
@@ -338,44 +731,80 @@ def process_docx(
             file_path,
             '-o', original_md
         ], check=True)
+        print(f"Created original markdown: {original_md}")
     except subprocess.CalledProcessError:
         # Fallback to simple conversion if pandoc fails
         doc = Document(file_path)
         with open(original_md, 'w', encoding='utf-8') as f:
             f.write('\n\n'.join(p.text for p in doc.paragraphs if p.text.strip()))
+        print(f"Created original markdown using fallback method: {original_md}")
 
     # 2. Generate academic rewrite using original markdown as input
-    academic_text = academic(
-        original_md,  # Changed from file_path to original_md
-        output_dir=output_dir,
-        llm=llm,
-        academic_lang=academic_lang,
-        chunk_length=chunk_length,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        temperature=temperature,
-        base_url=base_url,
-    )
+    try:
+        print(f"DEBUG: About to call academic() with original_md={original_md}")
+        # We already converted these to strings in the type checking at the start of the function
+        academic_text = academic(
+            original_md,  # Changed from file_path to original_md
+            output_dir=output_dir,
+            llm=llm,
+            academic_llm=academic_llm,
+            academic_lang=academic_lang,
+            chunk_length=chunk_length,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            base_url=base_url,
+        )
+        print("DEBUG: academic() function completed successfully")
+    except Exception as e:
+        print(f"DEBUG: Error in academic() function: {e}")
+        traceback.print_exc()
+        raise
 
     # 3. Generate comparison markdown using redlines
     compare_md = os.path.join(output_dir, f"{base_name}_compare.md")
     with open(original_md, 'r', encoding='utf-8') as f:
         original_text = f.read()
-    diff = Redlines(original_text, academic_text)
+    print(f"Creating redlines comparison between original and academic text")
+    try:
+        diff = Redlines(original_text, academic_text)
+        print("Redlines comparison created successfully")
+    except Exception as e:
+        print(f"Error creating redlines comparison: {e}")
+        raise
     with open(compare_md, 'w', encoding='utf-8') as f:
         f.write("# Document Comparison\n\n")
         f.write(f"**Original:** {base_name}\n")
         f.write(f"**Academic Rewrite:** {base_name}_academic\n\n")
         f.write("## Changes\n\n")
         f.write(diff.output_markdown)
+    print(f"Created comparison markdown: {compare_md}")
 
-    return {
+    # Only return the essential outputs
+    result = {
         'original_md': original_md,
         'compare_md': compare_md
     }
+    print(f"Process complete. Returning original and comparison markdown files.")
+    return result
 
 def split_text_preserve_footnotes(text):
     """Split text into paragraphs while preserving footnote references"""
+    print(f"DEBUG: split_text_preserve_footnotes called with text of length {len(text) if text else 0}")
+    print(f"DEBUG: text type: {type(text)}")
+
+    # Defensive check - ensure text is a string
+    if not isinstance(text, str):
+        print(f"WARNING: text is not a string: {type(text)}")
+        if text is None:
+            text = ""
+        else:
+            try:
+                text = str(text)
+            except Exception as e:
+                print(f"ERROR converting text to string: {e}")
+                text = ""
+
     paras = []
     current = []
     footnotes = {}

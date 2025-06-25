@@ -24,6 +24,7 @@ def process_input(
     transcribe_lang="",  # renamed from 'language'
     rewrite_llm="",
     translate_llm="",
+    academic_llm="",
     multi_language=False,
     translate_lang="Chinese",
     output_dir="",
@@ -37,6 +38,7 @@ def process_input(
     transcribe_model="large-v3",
     timestamp=None,  # Add timestamp parameter
     output_wav="",  # Change to string parameter
+    api_key="",  # Add API key parameter
 ):  # Add transcribe_model parameter
     """Process input in three steps:
     1. Convert input (URL/video/audio) to WAV
@@ -56,33 +58,49 @@ def process_input(
     if not file_path and not url:
         return "Error: No input provided", None, None, None
 
-    # Step 1: Convert input to WAV file with segment extraction
-    try:
-        # Handle docx files
-        if file_path and file_path.lower().endswith('.docx'):
-            outputs = process_docx(
-                file_path,
-                output_dir=out_dir,
-                llm=rewrite_llm,
-                academic_lang=academic_lang,
-                chunk_length=chunk_length,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                temperature=temperature,
-                base_url=base_url,
-            )
-            return (
-                outputs['original_md'],  # Primary output
-                outputs['compare_md'],  # Comparison markdown
-                None,  # No CSV file for docx
-                os.path.splitext(os.path.basename(file_path))[0]  # Base filename
-            )
+    # Set API key in environment if provided
+    if api_key:
+        import os as env_os  # Local import to ensure availability
+        env_os.environ["GOOGLE_API_KEY"] = api_key
+        print(f"Using provided API key for authentication")
 
+    # Special handling for DOCX files (completely separate flow)
+    if file_path and file_path.lower().endswith('.docx'):
+        # Step 1: Convert input to WAV file with segment extraction
+        try:
+            # Handle docx files - simplified to only produce original and comparison markdown
+            if file_path and file_path.lower().endswith('.docx'):
+                print(f"Processing DOCX file: {file_path}")
+                outputs = process_docx(
+                    file_path,
+                    output_dir=out_dir,
+                    llm=academic_llm or rewrite_llm,
+                    academic_llm=academic_llm,
+                    academic_lang=academic_lang,
+                    chunk_length=chunk_length,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                    temperature=temperature,
+                    base_url=base_url,
+                )
+                # Just return the two essential outputs: original markdown and comparison markdown
+                return (
+                    outputs['original_md'],  # Primary output - original markdown
+                    outputs['compare_md'],  # Comparison markdown showing the changes
+                    None,  # No CSV file for docx
+                    os.path.splitext(os.path.basename(file_path))[0]  # Base filename
+                )
+        except Exception as e:
+            print(f"Error processing DOCX file: {e}")
+            return f"Error: Failed to process DOCX file: {str(e)}", None, None, None
+
+    # Step 1: Convert input to WAV file with segment extraction (only for audio/video)
+    try:
         if url:
             file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
         elif file_path:
             # Use extract_audio_segment for all audio/video files except .wav
-            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', 
+            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v',
                                          '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
                 file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
             # If .wav, do nothing (already correct format)
@@ -184,14 +202,15 @@ def process_input(
 def create_interface():
     # Updated textbox label for rewrite LLM model.
     def process_wrapper(
-        file_path,
-        url,
-        transcribe_lang,  # renamed from 'language'
-        rewrite_llm,
-        translate_llm,
-        multi_language,
-        translate_lang,
-    ):
+            file_path,
+            url,
+            transcribe_lang,  # renamed from 'language'
+            rewrite_llm,
+            translate_llm,
+            academic_llm,
+            multi_language,
+            translate_lang,
+        ):
         multi_lang_bool = multi_language == "True"
         return process_input(
             file_path,
@@ -199,6 +218,7 @@ def create_interface():
             transcribe_lang,  # pass as transcribe_lang
             rewrite_llm,
             translate_llm,
+            academic_llm,
             multi_lang_bool,
             translate_lang,
         )
@@ -226,6 +246,11 @@ def create_interface():
                 label="Translation LLM Model (optional)",
                 value="ollama/qwen3",
                 placeholder="Enter translation LLM model identifier",
+            ),
+            gr.Textbox(
+                label="Academic LLM Model (optional)",
+                value="ollama/qwen3",
+                placeholder="Enter academic LLM model identifier",
             ),
             gr.Dropdown(
                 label="Multi-language Processing",

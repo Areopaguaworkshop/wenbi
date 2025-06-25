@@ -266,7 +266,8 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
 
     Args:
         audio_path (str): Path to input audio/video file
-        timestamp (dict, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format
+        timestamp (dict or tuple or list, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format,
+                                                   or a tuple/list of (start_seconds, end_seconds)
         output_dir (str, optional): Output directory for the extracted audio
         output_wav (str, optional): Custom filename for the output WAV file
     """
@@ -285,9 +286,25 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
             audio = AudioFileClip(audio_path)
 
         if timestamp:
-            # Convert HH:MM:SS to seconds
-            start = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['start'].split(':')))
-            end = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['end'].split(':')))
+            # Handle different timestamp formats
+            if isinstance(timestamp, dict) and 'start' in timestamp and 'end' in timestamp:
+                # Dictionary format with HH:MM:SS strings
+                start = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['start'].split(':')))
+                end = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['end'].split(':')))
+                start_str = timestamp['start']
+                end_str = timestamp['end']
+            elif isinstance(timestamp, (list, tuple)) and len(timestamp) == 2:
+                # Tuple format with seconds
+                start, end = timestamp
+                # Format seconds back to HH:MM:SS for filenames
+                start_str = f"{start//3600:02d}:{(start%3600)//60:02d}:{start%60:02d}"
+                end_str = f"{end//3600:02d}:{(end%3600)//60:02d}:{end%60:02d}"
+            else:
+                # For any other format, try converting to string and proceed
+                start = 0
+                end = 0
+                start_str = "00:00:00"
+                end_str = "00:00:00"
 
             # Extract segment
             audio = audio.subclipped(start, end)
@@ -297,7 +314,7 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
                 output_path = os.path.join(output_dir, f"{output_wav}.wav")
             else:
                 # Use default timestamp-based filename
-                output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
+                output_path = os.path.join(output_dir, f"{base_name}_{start_str}-{end_str}.wav")
         else:
             output_path = os.path.join(output_dir, f"{base_name}.wav")
 

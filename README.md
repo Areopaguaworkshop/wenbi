@@ -25,7 +25,7 @@ Wenbi is a Chinese name 文笔, meaning a good writting.
 
 - :100: The support provider is Ollama, you can use most of the models from ollama. 
 
-- :construction: other provider supporting, such as OpenAi, Google and Others. 
+- :white_check_mark: Supports OpenAI and Google Gemini models in addition to Ollama
 
 - :construction: fine-tuned model for specific job, for example for my personal project from [GCDFL](https://www.gcdfl.org/), introducing the eastern churches to Chinese audience through academic lectures; [CTCFOL](https://www.ctcfol.org/), The Chinese Translation of Church Fathers from Original Languages. 
 
@@ -35,7 +35,10 @@ Wenbi is a Chinese name 文笔, meaning a good writting.
 - You can install through pip (or other tools as uv or rye) and from source. 
 
 ### prerequest
-- Install [Ollama](https://ollama.com/) and dowload a model. The default model for this project is qwen2.5. 
+- Install [Ollama](https://ollama.com/) and download a model. The default model for this project is qwen2.5.
+- For using Google Gemini models, you'll need:
+  - A Google API key (set as `GOOGLE_API_KEY` environment variable) - recommended approach
+  - Or, if API key is not set, the system will fall back to Google Cloud application default credentials from `/home/ajiap/.config/gcloud/application_default_credentials.json` (requires `GOOGLE_CLOUD_PROJECT` environment variable)
 
 ### Install through pip
 
@@ -60,9 +63,9 @@ options:
                         Output directory (optional)
   --gui, -g             Launch Gradio GUI
   --rewrite-llm REWRITE_LLM, -rlm REWRITE_LLM
-                        Rewrite LLM model identifier (optional)
+                        Rewrite LLM model identifier (optional, e.g. ollama/qwen3, gemini/gemini-pro)
   --translate-llm TRANSLATE_LLM, -tlm TRANSLATE_LLM
-                        Translation LLM model identifier (optional)
+                        Translation LLM model identifier (optional, e.g. ollama/qwen3, gemini/gemini-pro)
   --transcribe-lang TRANSCRIBE_LANG, -s TRANSCRIBE_LANG
                         Transcribe language (optional)
   --translate-lang TRANSLATE_LANG, -t TRANSLATE_LANG
@@ -127,7 +130,27 @@ Then go to http://localhost:7860.
 
 'python wenbi/cli.py --help'
 
-:warning: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you nedd a HUGGINGFACE_TOKEN in you environment. by `export HUGGINGFACE_TOKEN="you HUGGINGFACE_TOKEN here"`. 
+:warning: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you need a HUGGINGFACE_TOKEN in your environment. by `export HUGGINGFACE_TOKEN="your HUGGINGFACE_TOKEN here"`. 
+
+### Using Google Gemini Models
+
+To use Google Gemini models (e.g., `gemini/gemini-pro`):
+
+1. Recommended: Use API Key (simplest approach)
+   ```
+   export GOOGLE_API_KEY="your_api_key_here"
+   ```
+
+2. Alternative: If API key is not available, the system will automatically fall back to Application Default Credentials
+   ```
+   export GOOGLE_CLOUD_PROJECT="your-project-id-here"
+   ```
+   This will use the credentials file at `/home/ajiap/.config/gcloud/application_default_credentials.json` with your specified Google Cloud project
+
+Example:
+```
+wenbi input.mp4 --rewrite-llm gemini/gemini-pro
+```
 
 
 Enjoy! 
