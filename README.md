@@ -38,7 +38,6 @@ Wenbi is a Chinese name 文笔, meaning a good writting.
 - Install [Ollama](https://ollama.com/) and download a model. The default model for this project is qwen2.5.
 - For using Google Gemini models, you'll need:
   - A Google API key (set as `GOOGLE_API_KEY` environment variable) - recommended approach
-  - Or, if API key is not set, the system will fall back to Google Cloud application default credentials from `/home/ajiap/.config/gcloud/application_default_credentials.json` (requires `GOOGLE_CLOUD_PROJECT` environment variable)
 
 ### Install through pip
 
