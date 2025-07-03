@@ -32,7 +32,8 @@ example/**/*
 *.vtt
 *.bin
 *.csv
-
+*.docx
+*.doc
 # Testing
 .tox/
 .coverage
