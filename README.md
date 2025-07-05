@@ -1,148 +1,128 @@
 # Wenbi
 
-A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. 
-
-Initally, this porject is just serving to my website [GCDFL](https://www.gcdfl.org/). We do a service to turn its lectures into a written files for easier further editing. 
-
-Wenbi is a Chinese name 文笔, meaning a good writting. 
-
-:warning: LLM can make mistakes (of course, human make mistakes too) and cannot be fully trusted. LLM can only be used for preliminary processing of data, some elementary work, and in this sense, LLM does greatly improve editing efficiency. 
-
-
-### you can try the [demo](https://archive.gcdfl.org/). 
+Wenbi is a versatile tool for processing video, audio, and subtitle files. It can transcribe, translate, and rewrite content, making it easy to convert spoken language into written text.
 
 ## Features
 
-- **100% Open source and totally free of use**. I love open source, I learned a lot from it. 
+- **Transcription:** Convert video and audio files into text using OpenAI's Whisper models.
+- **Translation:** Translate transcribed text into a specified language.
+- **Rewriting:** Refine transcribed text into a more formal, written style.
+- **Multiple Input Formats:** Supports video files, audio files, YouTube URLs, and subtitle files.
+- **Batch Processing:** Process multiple files in a directory at once.
+- **Configuration:** Use a YAML file to define complex workflows, including processing file segments and multiple files.
+- **Gradio GUI:** Provides a graphical user interface for ease of use.
 
-- :100: Accept most popular audio, video, subtitle files and url--mainly using yt-dlp as input. 
+## Installation
 
-- :100: Editing the files by using LLM to rewriting and translating the content into a readable written markdown files. 
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/wenbi.git
+    cd wenbi
+    ```
+2.  **Install dependencies:**
+    ```bash
+    pip install -r requirements.lock
+    ```
 
-- :100: Support input with multiple languages.
+## Usage
 
-- :100: offer an commandline and gradio GUI with multiple options for further personal settings 
+### `wenbi`
 
-- :100: The support provider is Ollama, you can use most of the models from ollama. 
+The `wenbi` command is the main entry point for the tool.
 
-- :construction: other provider supporting, such as OpenAi, Google and Others. 
+**Basic Usage:**
 
-- :construction: fine-tuned model for specific job, for example for my personal project from [GCDFL](https://www.gcdfl.org/), introducing the eastern churches to Chinese audience through academic lectures; [CTCFOL](https://www.ctcfol.org/), The Chinese Translation of Church Fathers from Original Languages. 
-
-:warning: the default translating and rewritten language are Chinese, however, you can choose other Ollama models, and languages through our commandline options. 
-
-## Install
-- You can install through pip (or other tools as uv or rye) and from source. 
-
-### prerequest
-- Install [Ollama](https://ollama.com/) and dowload a model. The default model for this project is qwen2.5. 
-
-### Install through pip
-
-1. build a virtue environment through [uv](https://docs.astral.sh/uv/guides/install-python/)--recommened or [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
-
--for uv: `uv venv --python 3.12`
-
-2. `uv pip install wenbi` or `uv add wenbi`
-
-:warning: due to some package issues, it is better to install llvmlite and numba first by `uv add llvmlite numba` , then install wenbi. 
-
-After install, you can simply using wenbi commandline. if you want a gradio GUI, you can run `wenbi --gui`. the commandline options as follow: 
-```
-wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.
-
-positional arguments:
-  input                 Path to input file or URL
-
-options:
-  -h, --help            show this help message and exit
-  --output-dir OUTPUT_DIR, -o OUTPUT_DIR
-                        Output directory (optional)
-  --gui, -g             Launch Gradio GUI
-  --rewrite-llm REWRITE_LLM, -rlm REWRITE_LLM
-                        Rewrite LLM model identifier (optional)
-  --translate-llm TRANSLATE_LLM, -tlm TRANSLATE_LLM
-                        Translation LLM model identifier (optional)
-  --transcribe-lang TRANSCRIBE_LANG, -s TRANSCRIBE_LANG
-                        Transcribe language (optional)
-  --translate-lang TRANSLATE_LANG, -t TRANSLATE_LANG
-                        Target translation language (default: Chinese)
-  --rewrite-lang REWRITE_LANG, -r REWRITE_LANG
-                        Target language for rewriting (default: Chinese)
-  --multi-language, -m  Enable multi-language processing
-  --chunk-length CHUNK_LENGTH, -c CHUNK_LENGTH
-                        the chunk of Number of sentences per paragraph for llm to tranlsate or rewrite.
-                        (default: 8)
-  --max-tokens MAX_TOKENS, -mt MAX_TOKENS
-                        Maximum tokens for LLM output (default: 50000)
-  --timeout TIMEOUT, -to TIMEOUT
-                        LLM request timeout in seconds (default: 3600)
-  --temperature TEMPERATURE, -tm TEMPERATURE
-                        LLM temperature parameter (default: 0.1)
-  --base-url BASE_URL, -u BASE_URL
-                        Base URL for LLM API (default: http://localhost:11434)
-  --transcribe-model {tiny,base,small,medium,large-v1,large-v2,large-v3}, -tsm {tiny,base,small,medium,large-v1,large-v2,large-v3,turbo}
-                        Whisper model size for transcription (default: large-v3, turbo)
-
+```bash
+wenbi <input_file_or_url> [options]
 ```
 
-### Install from Source
+**Arguments:**
 
-1. install [rye](https://rye.astral.sh/)
+*   `input`: Path to the input file (video, audio, or subtitle) or a URL.
 
-2. `
-git clone https://github.com/Areopaguaworkshop/wenbi.git
-` 
-3. 
-```
-cd wenbi 
+**Options:**
 
-mv pyproject.toml pyproject-bk.toml
+*   `--config, -c`: Path to a YAML configuration file.
+*   `--output-dir, -o`: Output directory.
+*   `--gui, -g`: Launch the Gradio GUI.
+*   `--rewrite_llm`: Rewrite LLM model identifier.
+*   `--translate_llm`: Translation LLM model identifier.
+*   `--transcribe-lang, -s`: Transcribe language.
+*   `--translate-lang, -t`: Target translation language (default: Chinese).
+*   `--rewrite-lang, -r`: Target language for rewriting (default: Chinese).
+*   `--academic-lang, -a`: Target language for academic writing (default: English).
+*   `--multi-language, -m`: Enable multi-language processing.
+*   `--chunk-length, -cl`: Number of sentences per paragraph for LLM processing (default: 8).
+*   `--max-tokens, -mt`: Maximum tokens for LLM output (default: 50000).
+*   `--timeout, -to`: LLM request timeout in seconds (default: 3600).
+*   `--temperature, -tm`: LLM temperature parameter (default: 0.1).
+*   `--base-url, -u`: Base URL for LLM API (default: http://localhost:11434).
+*   `--transcribe-model, -tsm`: Whisper model size for transcription (default: large-v3-turbo).
+*   `--output_wav, -ow`: Filename for saving the segmented WAV.
+*   `--start_time, -st`: Start time for extraction (format: HH:MM:SS).
+*   `--end_time, -et`: End time for extraction (format: HH:MM:SS).
 
-rye init 
+### `wenbi-batch`
 
-```
+The `wenbi-batch` command processes all media files in a directory.
 
-4. `
-copy whole content of the pyproject-bk.toml into pyproject.toml
-` 
-5. 
-`source .venv/bin/activate` 
+**Basic Usage:**
 
-`rye pin 3.12` 
-
-`rye sync`
-
-:warning: Again, you may face some package issues. you can either install the depencies one by one in the pyproject-bk.toml, or  add llvmlite and numba first by `rye add llvmlite numba` , then install wenbi. 
-
-6. You can choose commandline or webGUI through gradio.
-
-- gradio
-
-`python wenbi/main.py`
-
-Then go to http://localhost:7860. 
-
-- commandline 
-
-'python wenbi/cli.py --help'
-
-:warning: if you want to convert the audio file of multi-language, you should set multi-language as True. for commandline is --multi-language. you nedd a HUGGINGFACE_TOKEN in you environment. by `export HUGGINGFACE_TOKEN="you HUGGINGFACE_TOKEN here"`. 
-
-
-Enjoy! 
-
-### Buy me a [Cofee](https://www.gcdfl.org/donate/). 
-
-## License:
-AI-Subtitle-Editor is licensed under the Apache License 2.0 found in the [LICENSE](https://github.com/Areopaguaworkshop/AI-Subtitle-Editor/blob/main/license.md) file in the root directory of this repository.
-
-## Citation:
-```@article{Areopaguaworkshop/wenbi
-  title = {wenbi},
-  author = {Ephrem, Yuan},
-  year = {2024},
-}
-
+```bash
+wenbi-batch <input_directory> [options]
 ```
 
+**Arguments:**
+
+*   `input_dir`: Input directory containing media files.
+
+**Options:**
+
+*   `--config, -c`: YAML configuration file.
+*   `--output-dir`: Output directory.
+*   `--md`: Output combined markdown file path.
+
+### YAML Configuration
+
+The YAML configuration file allows for more complex workflows.
+
+**Example:**
+
+```yaml
+# config/single-input.yaml
+input: "example/Phd-finalDraft-2025-07-02_split/1.wav"
+output_dir: "output"
+rewrite_llm: "mistral"
+translate_llm: "mistral"
+transcribe_lang: "en"
+translate_lang: "zh"
+rewrite_lang: "zh"
+multi_language: true
+chunk_length: 8
+max_tokens: 50000
+timeout: 3600
+temperature: 0.1
+base_url: "http://localhost:11434"
+transcribe_model: "large-v3-turbo"
+```
+
+**To use the config file:**
+
+```bash
+wenbi --config config/single-input.yaml
+```
+
+### `mini.py`
+
+The `mini.py` script is a simple tool for processing subtitle files.
+
+**Usage:**
+
+```bash
+python mini.py <subtitle_file> [-s <sentence_count>]
+```
+
+**Arguments:**
+
+*   `file`: Path to the subtitle file.
+*   `--sentences, -s`: Maximum sentences per paragraph (default: 10).
