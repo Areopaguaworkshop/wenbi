@@ -119,7 +119,7 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
     return out_file, detected_language
 
 
-def segment(file_path, sentence_count=8):
+def segment(file_path, sentence_count=20):
     """Segments a text file into paragraphs by grouping every N sentences."""
     try:
         # Handle docx files
@@ -212,7 +212,7 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None):
                 output_file = os.path.join(output_dir, f"{output_wav}.wav")
             else:
                 output_file = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
-            
+
             if timestamp:
                 # Extract the specified segment
                 return extract_audio_segment(output_file, timestamp, output_dir)
@@ -249,7 +249,7 @@ def parse_timestamp(start_time=None, end_time=None):
         def time_to_seconds(time_str):
             h, m, s = map(int, time_str.split(':'))
             return h * 3600 + m * 60 + s
-            
+
         return (time_to_seconds(start_time), time_to_seconds(end_time))
     except:
         raise ValueError("Invalid time format. Use HH:MM:SS")
@@ -258,7 +258,7 @@ def parse_timestamp(start_time=None, end_time=None):
 def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wav=""):
     """
     Extract full audio or segment using moviepy.
-    
+
     Args:
         audio_path (str): Path to input audio/video file
         timestamp (dict, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format
@@ -267,9 +267,9 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
     """
     if output_dir is None:
         output_dir = os.path.dirname(audio_path)
-    
+
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
-    
+
     try:
         # Use VideoFileClip first to handle both video and audio files
         try:
@@ -278,12 +278,12 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
         except:
             # If not video, try loading as audio
             audio = AudioFileClip(audio_path)
-        
+
         if timestamp:
             # Convert HH:MM:SS to seconds
             start = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['start'].split(':')))
             end = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['end'].split(':')))
-            
+
             # Extract segment
             audio = audio.subclipped(start, end)
             if output_wav:
@@ -295,16 +295,16 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
                 output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
         else:
             output_path = os.path.join(output_dir, f"{base_name}.wav")
-        
+
         # Write WAV file
         audio.write_audiofile(output_path, codec='pcm_s16le')
-        
+
         # Clean up
         audio.close()
         if 'clip' in locals():
             clip.close()
-            
+
         return output_path
-        
+
     except Exception as e:
         raise Exception(f"Error extracting audio: {e}")

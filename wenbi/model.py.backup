@@ -146,7 +146,6 @@ def academic(
     timeout=3600,
     temperature=0.1,
 ):
-    # Read the original text
     segmented_text = segment(file_path, sentence_count=chunk_length)
     paragraphs = segmented_text.split("\n\n")
 
@@ -177,38 +176,11 @@ def academic(
             academic_paragraphs.append(response.academic)
 
     academic_text = "\n\n".join(academic_paragraphs)
-    
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_academic.md")
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(academic_text)
-        
-        # Create comparison file using Redline
-        try:
-            import redlines
-            
-            # Create a comparison between original and academic text
-            diff = redlines.Redlines(segmented_text, academic_text)
-            compare_output = diff.output_markdown
-            
-            # Save comparison file
-            compare_file = os.path.join(output_dir, f"{base_name}_compare.md")
-            with open(compare_file, "w", encoding="utf-8") as f:
-                f.write("# Academic Writing Comparison\n\n")
-                f.write("This document shows the changes made during academic rewriting.\n\n")
-                f.write("## Legend:\n")
-                f.write("- **Red text with strikethrough**: Deleted content\n")
-                f.write("- **Green text**: Added content\n\n")
-                f.write("## Comparison:\n\n")
-                f.write(compare_output)
-            
-            print(f"Comparison file created: {compare_file}")
-            
-        except ImportError:
-            print("Warning: redlines library not available, skipping comparison file")
-        except Exception as e:
-            print(f"Warning: Could not create comparison file: {e}")
     else:
         out_file = None
 

@@ -5,7 +5,7 @@ from wenbi.utils import (
     language_detect,
     download_audio,
 )
-from wenbi.model import rewrite, translate, process_docx
+from wenbi.model import rewrite, translate, process_docx, academic
 import os
 import gradio as gr
 import sys
@@ -18,30 +18,48 @@ OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+def is_video_audio_or_url(file_path, url):
+    """Check if input is video, audio, or URL"""
+    if url.strip():
+        return True
+    
+    if file_path:
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')
+        audio_extensions = ('.mp3', '.flac', '.aac', '.ogg', '.m4a', '.opus')
+        return file_path.lower().endswith(video_extensions + audio_extensions)
+    
+    return False
+
+
+def is_text_file(file_path):
+    """Check if input is VTT, markdown, or docx file"""
+    if not file_path:
+        return False
+    
+    text_extensions = ('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt', '.md', '.markdown', '.docx')
+    return file_path.lower().endswith(text_extensions)
+
+
 def process_input(
     file_path=None,
     url="",
     transcribe_lang="",  # renamed from 'language'
-    rewrite_llm="",
-    translate_llm="",
+    llm="",
     multi_language=False,
-    translate_lang="Chinese",
+    lang="Chinese",  # Consolidated language parameter
     output_dir="",
-    rewrite_lang="Chinese",
-    academic_lang="English",
     chunk_length=8,
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
-    base_url="http://localhost:11434",
     transcribe_model="large-v3",
-    timestamp=None,  # Add timestamp parameter
-    output_wav="",  # Change to string parameter
-):  # Add transcribe_model parameter
-    """Process input in three steps:
-    1. Convert input (URL/video/audio) to WAV
-    2. Generate VTT file(s) via transcription
-    3. Process VTT based on language detection
+    timestamp=None,
+    output_wav="",
+    subcommand=None,  # New parameter to specify which subcommand to use
+):
+    """Process input with new logic:
+    1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
+    2. If input is VTT/markdown/docx: directly process with subcommand
     """
     # Use current directory for CLI, package directory for web interface
     out_dir = (
@@ -56,146 +74,261 @@ def process_input(
     if not file_path and not url:
         return "Error: No input provided", None, None, None
 
-    # Step 1: Convert input to WAV file with segment extraction
-    try:
-        # Handle docx files
-        if file_path and file_path.lower().endswith('.docx'):
-            result, docx_out = process_docx(
-                file_path,
+    # Check if input is video/audio/URL
+    if is_video_audio_or_url(file_path, url):
+        # Step 1: Convert to WAV
+        try:
+            if url:
+                file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
+            elif file_path:
+                # Use extract_audio_segment for all audio/video files except .wav
+                if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v',
+                                             '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
+                    file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
+                # If .wav, do nothing (already correct format)
+        except Exception as e:
+            print(f"Error converting to WAV: {e}")
+            return "Error: Failed to convert to WAV", None, None, None
+
+        # Step 2: Transcribe to VTT
+        try:
+            if multi_language:
+                from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
+
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                transcriptions = transcribe_multi_speaker(
+                    file_path, model_size=transcribe_model
+                )
+                vtt_files = speaker_vtt(
+                    transcriptions, output_dir=out_dir, base_filename=base_name
+                )
+            else:
+                lang_code = transcribe_lang if transcribe_lang.strip() else None
+                vtt_file, _ = transcribe(
+                    file_path,
+                    language=lang_code,
+                    output_dir=out_dir,
+                    model_size=transcribe_model,
+                )
+                vtt_files = {None: vtt_file}
+        except Exception as e:
+            print(f"Error during transcription: {e}")
+            return "Error: Failed during transcription", None, None, None
+
+        # Step 3: Process VTT files with subcommand
+        if subcommand:
+            # Process each VTT file with the specified subcommand
+            final_outputs = {}
+            for speaker, vtt_file in vtt_files.items():
+                try:
+                    if subcommand == "translate":
+                        result = translate(
+                            vtt_file,
+                            output_dir=out_dir,
+                            translate_language=lang,
+                            llm=llm,
+                            chunk_length=chunk_length,
+                            max_tokens=max_tokens,
+                            timeout=timeout,
+                            temperature=temperature,
+                        )
+                    elif subcommand == "rewrite":
+                        result = rewrite(
+                            vtt_file,
+                            output_dir=out_dir,
+                            llm=llm,
+                            rewrite_lang=lang,
+                            chunk_length=chunk_length,
+                            max_tokens=max_tokens,
+                            timeout=timeout,
+                            temperature=temperature,
+                        )
+                    elif subcommand == "academic":
+                        result = academic(
+                            vtt_file,
+                            output_dir=out_dir,
+                            llm=llm,
+                            academic_lang=lang,
+                            chunk_length=chunk_length,
+                            max_tokens=max_tokens,
+                            timeout=timeout,
+                            temperature=temperature,
+                        )
+                    else:
+                        result = "Error: Unknown subcommand"
+                    
+                    final_outputs[speaker if speaker else "output"] = result
+                except Exception as e:
+                    print(f"Error processing VTT with {subcommand}: {e}")
+                    return f"Error: Failed during {subcommand} processing", None, None, None
+
+            if multi_language:
+                return final_outputs
+            else:
+                result = final_outputs["output"]
+                base_name = os.path.splitext(os.path.basename(vtt_file))[0]
+                return result, result, None, base_name
+        else:
+            # Original behavior for backward compatibility
+            return _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language)
+
+    # Check if input is text file (VTT, markdown, docx)
+    elif is_text_file(file_path):
+        if subcommand:
+            # Process text file directly with subcommand
+            try:
+                if subcommand == "translate":
+                    result = translate(
+                        file_path,
+                        output_dir=out_dir,
+                        translate_language=lang,
+                        llm=llm,
+                        chunk_length=chunk_length,
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        temperature=temperature,
+                    )
+                elif subcommand == "rewrite":
+                    result = rewrite(
+                        file_path,
+                        output_dir=out_dir,
+                        llm=llm,
+                        rewrite_lang=lang,
+                        chunk_length=chunk_length,
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        temperature=temperature,
+                    )
+                elif subcommand == "academic":
+                    result = academic(
+                        file_path,
+                        output_dir=out_dir,
+                        llm=llm,
+                        academic_lang=lang,
+                        chunk_length=chunk_length,
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        temperature=temperature,
+                    )
+                else:
+                    return "Error: Unknown subcommand", None, None, None
+                
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                return result, result, None, base_name
+            except Exception as e:
+                print(f"Error processing text file with {subcommand}: {e}")
+                return f"Error: Failed during {subcommand} processing", None, None, None
+        else:
+            # Original behavior for backward compatibility
+            return _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature)
+    
+    else:
+        return "Error: Unsupported file type", None, None, None
+
+
+def _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language):
+    """Original VTT processing logic for backward compatibility"""
+    final_outputs = {}
+    
+    # Defensive: handle both dict and list (or single file)
+    if isinstance(vtt_files, dict):
+        vtt_iter = vtt_files.items()
+    elif isinstance(vtt_files, list):
+        vtt_iter = enumerate(vtt_files)
+    else:
+        # fallback: treat as single file
+        vtt_iter = [(None, vtt_files)]
+
+    for speaker, vtt_file in vtt_iter:
+        if not multi_language:
+            base_name = os.path.splitext(os.path.basename(vtt_file))[0]
+            csv_file = os.path.join(out_dir, f"{base_name}.csv")
+            parse_subtitle(vtt_file).to_csv(
+                csv_file, index=True, encoding="utf-8"
+            )
+            print(f"CSV file '{csv_file}' created successfully.")
+
+        detected_lang = language_detect(vtt_file)
+        print(f"Detected language for {speaker or 'input'}: {detected_lang}")
+
+        # Determine which LLM function to call based on detected language and target language
+        if detected_lang == "zh" and lang.lower() == "chinese":
+            # Use rewrite for Chinese to Chinese translation/rewriting
+            output = rewrite(
+                vtt_file,
                 output_dir=out_dir,
-                llm=rewrite_llm,
-                academic_lang=academic_lang,
+                llm=llm,
+                rewrite_lang=lang,
                 chunk_length=chunk_length,
                 max_tokens=max_tokens,
                 timeout=timeout,
                 temperature=temperature,
-                base_url=base_url,
-            )
-            return result, docx_out, None, os.path.splitext(os.path.basename(file_path))[0]
-
-        if url:
-            file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
-        elif file_path:
-            # Use extract_audio_segment for all audio/video files except .wav
-            if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', 
-                                         '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
-                file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
-            # If .wav, do nothing (already correct format)
-            # Note: subtitle files don't need conversion
-    except Exception as e:
-        print(f"Error in Step 1 (Converting to WAV): {e}")
-        return "Error: Failed to process input", None, None, None
-
-    # Step 2: Generate VTT file(s) through transcription
-    try:
-        if multi_language:
-            from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
-
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            transcriptions = transcribe_multi_speaker(
-                file_path, model_size=transcribe_model
-            )  # Pass model size
-            vtt_files = speaker_vtt(
-                transcriptions, output_dir=out_dir, base_filename=base_name
             )
         else:
-            if file_path.lower().endswith(
-                (".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi", ".txt")
-            ):
-                vtt_files = {None: file_path}
-            else:
-                lang = transcribe_lang if transcribe_lang.strip() else None
-                vtt_file, _ = transcribe(
-                    file_path,
-                    language=lang,
-                    output_dir=out_dir,
-                    model_size=transcribe_model,
-                )  # Pass model size
-                vtt_files = {None: vtt_file}
-    except Exception as e:
-        print(f"Error in Step 2 (Transcription): {e}")
-        return "Error: Failed during transcription", None, None, None
+            # Use translate for other languages or when target is not Chinese
+            output = translate(
+                vtt_file,
+                output_dir=out_dir,
+                translate_language=lang,
+                llm=llm,
+                chunk_length=chunk_length,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                temperature=temperature,
+            )
+        final_outputs[speaker if speaker else "output"] = output
 
-    # Step 3: Process VTT file(s) based on language detection
-    final_outputs = {}
-    try:
-        # Defensive: handle both dict and list (or single file)
-        if isinstance(vtt_files, dict):
-            vtt_iter = vtt_files.items()
-        elif isinstance(vtt_files, list):
-            vtt_iter = enumerate(vtt_files)
-        else:
-            # fallback: treat as single file
-            vtt_iter = [(None, vtt_files)]
+    if multi_language:
+        return final_outputs
+    else:
+        result = final_outputs["output"]
+        return result, result, csv_file, base_name
 
-        for speaker, vtt_file in vtt_iter:
-            if not multi_language:
-                base_name = os.path.splitext(os.path.basename(vtt_file))[0]
-                csv_file = os.path.join(out_dir, f"{base_name}.csv")
-                parse_subtitle(vtt_file).to_csv(
-                    csv_file, index=True, encoding="utf-8")
-                print(f"CSV file '{csv_file}' created successfully.")
 
-            detected_lang = language_detect(vtt_file)
-            print(f"Detected language for {speaker or 'input'}: {detected_lang}")
+def _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature):
+    """Original text file processing logic for backward compatibility"""
+    # If llm is provided and it's intended for academic processing,
+    # and the input is a text file, go directly to academic processing.
+    if llm and file_path.lower().endswith(('.docx', '.txt', '.md')):
+        academic_text = academic(
+            file_path,
+            output_dir=out_dir,
+            llm=llm,
+            academic_lang=lang,
+            chunk_length=chunk_length,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+        )
 
-            if detected_lang == "zh" and translate_lang.lower() == "chinese":
-                output = rewrite(
-                    vtt_file,
-                    output_dir=out_dir,
-                    llm=rewrite_llm,
-                    rewrite_lang=rewrite_lang,
-                    chunk_length=chunk_length,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                    temperature=temperature,
-                    base_url=base_url,
-                )
-            else:
-                output = translate(
-                    vtt_file,
-                    output_dir=out_dir,
-                    translate_language=translate_lang,
-                    llm=translate_llm,
-                    chunk_length=chunk_length,
-                    max_tokens=max_tokens,
-                    timeout=timeout,
-                    temperature=temperature,
-                    base_url=base_url,
-                )
-            final_outputs[speaker if speaker else "output"] = output
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        output_file = os.path.join(out_dir, f"{base_name}_academic.md")
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(academic_text)
 
-        if multi_language:
-            return final_outputs
-        else:
-            result = final_outputs["output"]
-            return result, result, csv_file, base_name
-
-    except Exception as e:
-        print(f"Error in Step 3 (Language Processing): {e}")
-        return "Error: Failed during language processing", None, None, None
+        return academic_text, output_file, None, base_name
+    
+    return "Error: Cannot process this file type without subcommand", None, None, None
 
 
 def create_interface():
-    # Updated textbox label for rewrite LLM model.
+    # Updated textbox label for LLM model.
     def process_wrapper(
         file_path,
         url,
         transcribe_lang,  # renamed from 'language'
-        rewrite_llm,
-        translate_llm,
+        llm,  # Unified LLM parameter
         multi_language,
-        translate_lang,
+        lang,  # Consolidated language parameter
     ):
         multi_lang_bool = multi_language == "True"
         return process_input(
             file_path,
             url,
             transcribe_lang,  # pass as transcribe_lang
-            rewrite_llm,
-            translate_llm,
+            llm,  # pass the unified llm parameter
             multi_lang_bool,
-            translate_lang,
+            lang,  # pass the consolidated lang parameter
         )
 
     iface = gr.Interface(
@@ -213,14 +346,9 @@ def create_interface():
                 placeholder="e.g., Chinese, English",
             ),
             gr.Textbox(
-                label="Rewrite LLM Model (optional)",
+                label="LLM Model (optional)",
                 value="ollama/qwen3",
-                placeholder="Enter rewrite LLM model identifier",
-            ),
-            gr.Textbox(
-                label="Translation LLM Model (optional)",
-                value="ollama/qwen3",
-                placeholder="Enter translation LLM model identifier",
+                placeholder="Enter LLM model identifier (e.g., ollama/qwen3, gemini/gemini-1.5-flash)",
             ),
             gr.Dropdown(
                 label="Multi-language Processing",
@@ -229,9 +357,9 @@ def create_interface():
                 type="value",
             ),
             gr.Textbox(
-                label="Translation Language (optional)",
+                label="Target Language",
                 value="Chinese",
-                placeholder="Enter target translation language",
+                placeholder="Enter target language",
             ),
         ],
         outputs=[
@@ -240,7 +368,7 @@ def create_interface():
             gr.File(label="Download CSV", type="filepath"),
             gr.Textbox(label="Filename (without extension)"),
         ],
-        title="Wenbi, rewriting or tranlsaing all video, audio and subtitle files into a readable markdown files",
+        title="Wenbi, rewriting or translating all video, audio and subtitle files into a readable markdown files",
         description="Upload a file or provide a URL to convert audio/video/subtitles to markdown and CSV.",
     )
     return iface

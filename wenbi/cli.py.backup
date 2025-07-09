@@ -158,26 +158,17 @@ def handle_rewrite_command(args):
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
-        'lang': args.lang or config.get('lang', 'Chinese'),
-        'subcommand': 'rewrite',
-        'transcribe_model': 'large-v3',
     }
 
-    # Use the new process_input function that handles all file types
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input,
-        args.input if is_url else "",
+    # Call rewrite function directly
+    result = rewrite(
+        args.input,
+        rewrite_lang=args.lang or config.get('lang', 'Chinese'),
         **params
     )
 
-    if result[0] and not result[0].startswith("Error"):
-        print("Rewrite completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the rewritten text in:", result[1])
-    else:
-        print("Error:", result[0])
+    print("Rewrite completed successfully!")
+    print("Output:", result)
 
 
 def handle_translate_command(args):
@@ -193,26 +184,17 @@ def handle_translate_command(args):
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
-        'lang': args.lang or config.get('lang', 'Chinese'),
-        'subcommand': 'translate',
-        'transcribe_model': 'large-v3',
     }
 
-    # Use the new process_input function that handles all file types
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input,
-        args.input if is_url else "",
+    # Call translate function directly
+    result = translate(
+        args.input,
+        translate_language=args.lang or config.get('lang', 'Chinese'),
         **params
     )
 
-    if result[0] and not result[0].startswith("Error"):
-        print("Translation completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the translated text in:", result[1])
-    else:
-        print("Error:", result[0])
+    print("Translation completed successfully!")
+    print("Output:", result)
 
 
 def handle_academic_command(args):
@@ -228,26 +210,17 @@ def handle_academic_command(args):
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
-        'lang': args.lang or config.get('lang', 'English'),
-        'subcommand': 'academic',
-        'transcribe_model': 'large-v3',
     }
 
-    # Use the new process_input function that handles all file types
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input,
-        args.input if is_url else "",
+    # Call academic function directly
+    result = academic(
+        args.input,
+        academic_lang=args.lang or config.get('lang', 'English'),
         **params
     )
 
-    if result[0] and not result[0].startswith("Error"):
-        print("Academic rewriting completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the academic text in:", result[1])
-    else:
-        print("Error:", result[0])
+    print("Academic rewriting completed successfully!")
+    print("Output:", result)
 
 
 def main():
