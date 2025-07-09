@@ -1,6 +1,6 @@
 [project]
 name = "wenbi"
-version = "0.140.69"
+version = "0.140.71"
 description = "A simple tool to make the video, audio, subtitle and video-url (especially youtube) content into a written markdown files with the ability to rewritten the oral expression into written ones, or translating the content into a target language by using LLM. "
 license = "Apache-2.0"
 authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
@@ -25,6 +25,7 @@ dependencies = [
     "natsort>=8.4.0",
     "python-docx>=1.1.2",
     "redlines>=0.5.2",
+    "reportlab>=4.4.2",
     # "python_redlines @ git+https://github.com/JSv4/Python-Redlines@v0.0.1",
 ]
 readme = "README.md"

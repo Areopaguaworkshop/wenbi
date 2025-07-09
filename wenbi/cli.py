@@ -145,8 +145,45 @@ def process_yaml_config(config):
     return outputs
 
 
+def is_video_audio_or_url(file_path, url):
+    """Check if input is video, audio, or URL"""
+    if url and url.strip():
+        return True
+    
+    if file_path:
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')
+        audio_extensions = ('.mp3', '.flac', '.aac', '.ogg', '.m4a', '.opus')
+        return file_path.lower().endswith(video_extensions + audio_extensions)
+    
+    return False
+
+
+def validate_transcription_args(args):
+    """Validate that transcription-related arguments are only used with video/audio/URL inputs"""
+    # Check if input is video, audio, or URL
+    is_media_input = is_video_audio_or_url(args.input, "")
+    
+    # Check for transcription-related arguments
+    transcription_args = []
+    if hasattr(args, 'transcribe_model') and args.transcribe_model != 'large-v3':
+        transcription_args.append('--transcribe-model')
+    if hasattr(args, 'multi_language') and args.multi_language:
+        transcription_args.append('--multi-language')
+    if hasattr(args, 'transcribe_lang') and args.transcribe_lang:
+        transcription_args.append('--transcribe-lang')
+    
+    # If transcription arguments are used with non-media input, show error
+    if transcription_args and not is_media_input:
+        print(f"Error: The following options can only be used with video, audio, or URL inputs: {', '.join(transcription_args)}")
+        print(f"Your input '{args.input}' is not a video, audio file, or URL.")
+        sys.exit(1)
+
+
 def handle_rewrite_command(args):
     """Handle the rewrite subcommand"""
+    # Validate transcription arguments
+    validate_transcription_args(args)
+    
     # Load config if provided
     config = load_config(args.config)
 
@@ -160,8 +197,17 @@ def handle_rewrite_command(args):
         'temperature': args.temperature or config.get('temperature', 0.1),
         'lang': args.lang or config.get('lang', 'Chinese'),
         'subcommand': 'rewrite',
-        'transcribe_model': 'large-v3',
+        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3'),
+        'multi_language': args.multi_language or config.get('multi_language', False),
+        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+        'output_wav': args.output_wav or config.get('output_wav', ''),
     }
+
+    # Handle timestamp parameters
+    if args.start_time and args.end_time:
+        params['timestamp'] = parse_timestamp(args.start_time, args.end_time)
+    else:
+        params['timestamp'] = None
 
     # Use the new process_input function that handles all file types
     is_url = args.input.startswith(("http://", "https://", "www."))
@@ -182,6 +228,9 @@ def handle_rewrite_command(args):
 
 def handle_translate_command(args):
     """Handle the translate subcommand"""
+    # Validate transcription arguments
+    validate_transcription_args(args)
+    
     # Load config if provided
     config = load_config(args.config)
 
@@ -195,8 +244,17 @@ def handle_translate_command(args):
         'temperature': args.temperature or config.get('temperature', 0.1),
         'lang': args.lang or config.get('lang', 'Chinese'),
         'subcommand': 'translate',
-        'transcribe_model': 'large-v3',
+        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3'),
+        'multi_language': args.multi_language or config.get('multi_language', False),
+        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+        'output_wav': args.output_wav or config.get('output_wav', ''),
     }
+
+    # Handle timestamp parameters
+    if args.start_time and args.end_time:
+        params['timestamp'] = parse_timestamp(args.start_time, args.end_time)
+    else:
+        params['timestamp'] = None
 
     # Use the new process_input function that handles all file types
     is_url = args.input.startswith(("http://", "https://", "www."))
@@ -217,6 +275,9 @@ def handle_translate_command(args):
 
 def handle_academic_command(args):
     """Handle the academic subcommand"""
+    # Validate transcription arguments
+    validate_transcription_args(args)
+    
     # Load config if provided
     config = load_config(args.config)
 
@@ -230,8 +291,17 @@ def handle_academic_command(args):
         'temperature': args.temperature or config.get('temperature', 0.1),
         'lang': args.lang or config.get('lang', 'English'),
         'subcommand': 'academic',
-        'transcribe_model': 'large-v3',
+        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3'),
+        'multi_language': args.multi_language or config.get('multi_language', False),
+        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+        'output_wav': args.output_wav or config.get('output_wav', ''),
     }
+
+    # Handle timestamp parameters
+    if args.start_time and args.end_time:
+        params['timestamp'] = parse_timestamp(args.start_time, args.end_time)
+    else:
+        params['timestamp'] = None
 
     # Use the new process_input function that handles all file types
     is_url = args.input.startswith(("http://", "https://", "www."))
@@ -259,10 +329,10 @@ def main():
     )
 
     # Add subparsers
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    subparsers = parser.add_subparsers(dest='command', help='Available commands', required=True)
 
-    # Common arguments for all subcommands
-    def add_common_args(subparser):
+    # Global arguments for all subcommands
+    def add_global_args(subparser):
         subparser.add_argument("input", help="Path to input file or URL")
         subparser.add_argument("--config", "-c", default="", help="Path to YAML configuration file")
         subparser.add_argument("--output-dir", "-o", default="", help="Output directory (optional)")
@@ -276,47 +346,36 @@ def main():
                              help="LLM request timeout in seconds (default: 3600)")
         subparser.add_argument("--temperature", "-tm", type=float, default=0.1,
                              help="LLM temperature parameter (default: 0.1)")
+        # Transcription-related arguments (only for video/audio/URL inputs)
+        subparser.add_argument("--transcribe-model", "-tsm", default="large-v3",
+                             choices=["tiny", "base", "small", "medium", "large-v1", "large-v2",
+                                     "large-v3", "large-v3-turbo", "turbo"],
+                             help="Whisper model size for transcription (default: large-v3)")
+        subparser.add_argument("--multi-language", "-m", action="store_true", 
+                             help="Enable multi-language processing (video/audio/URL only)")
+        subparser.add_argument("--transcribe-lang", "-s", default="", 
+                             help="Transcribe language (video/audio/URL only)")
+        subparser.add_argument("--output-wav", "-ow", default="", 
+                             help="Filename for saving the segmented WAV (optional)")
+        subparser.add_argument("--start-time", "-st", default="", 
+                             help="Start time for extraction (format: HH:MM:SS)")
+        subparser.add_argument("--end-time", "-et", default="", 
+                             help="End time for extraction (format: HH:MM:SS)")
 
     # Rewrite subcommand
     rewrite_parser = subparsers.add_parser('rewrite', aliases=['rw'], help='Rewrite text')
-    add_common_args(rewrite_parser)
+    add_global_args(rewrite_parser)
     rewrite_parser.set_defaults(func=handle_rewrite_command)
 
     # Translate subcommand
     translate_parser = subparsers.add_parser('translate', aliases=['tr'], help='Translate text')
-    add_common_args(translate_parser)
+    add_global_args(translate_parser)
     translate_parser.set_defaults(func=handle_translate_command)
 
     # Academic subcommand
     academic_parser = subparsers.add_parser('academic', aliases=['ac'], help='Academic rewriting')
-    add_common_args(academic_parser)
+    add_global_args(academic_parser)
     academic_parser.set_defaults(func=handle_academic_command)
-
-    # Main command (original functionality) - only add if no subcommand
-    if len(sys.argv) == 1 or (len(sys.argv) > 1 and sys.argv[1] not in ['rewrite', 'rw', 'translate', 'tr', 'academic', 'ac']):
-        parser.add_argument("input", nargs="?", default="", help="Path to input file or URL")
-        parser.add_argument("--config", "-c", default="", help="Path to YAML configuration file")
-        parser.add_argument("--output-dir", "-o", default="", help="Output directory (optional)")
-        parser.add_argument("--gui", "-g", action="store_true", help="Launch Gradio GUI")
-        parser.add_argument("--llm", default="", help="LLM model identifier (optional)")
-        parser.add_argument("--transcribe-lang", "-s", default="", help="Transcribe language (optional)")
-        parser.add_argument("--lang", "-l", default="Chinese", help="Target language (default: Chinese)")
-        parser.add_argument("--multi-language", "-m", action="store_true", help="Enable multi-language processing")
-        parser.add_argument("--chunk-length", "-cl", type=int, default=8,
-                           help="Number of sentences per paragraph (default: 8)")
-        parser.add_argument("--max-tokens", "-mt", type=int, default=130000,
-                           help="Maximum tokens for LLM output (default: 130000)")
-        parser.add_argument("--timeout", "-to", type=int, default=3600,
-                           help="LLM request timeout in seconds (default: 3600)")
-        parser.add_argument("--temperature", "-tm", type=float, default=0.1,
-                           help="LLM temperature parameter (default: 0.1)")
-        parser.add_argument("--transcribe-model", "-tsm", default="large-v3-turbo",
-                           choices=["tiny", "base", "small", "medium", "large-v1", "large-v2",
-                                   "large-v3", "large-v3-turbo", "turbo"],
-                           help="Whisper model size for transcription (default: large-v3-turbo)")
-        parser.add_argument("--output_wav", "-ow", default="", help="Filename for saving the segmented WAV (optional)")
-        parser.add_argument("--start_time", "-st", default="", help="Start time for extraction (format: HH:MM:SS)")
-        parser.add_argument("--end_time", "-et", default="", help="End time for extraction (format: HH:MM:SS)")
 
     args = parser.parse_args()
 
@@ -325,71 +384,8 @@ def main():
         args.func(args)
         return
 
-    # Handle config file processing for main command
-    if args.config:
-        if not args.config.endswith(('.yml', '.yaml')):
-            print("Error: Config file must be a YAML file")
-            sys.exit(1)
-
-        config = load_config(args.config)
-        if not isinstance(config, dict):
-            print("Error: Invalid YAML configuration")
-            sys.exit(1)
-
-        outputs = process_yaml_config(config)
-
-        if outputs:
-            output_dir = config.get('output_dir', '')
-            final_output = combine_markdown_files(outputs, output_dir)
-            print(f"Combined output saved to: {final_output}")
-        return
-
-    # Load config file if provided
-    config = load_config(args.config)
-
-    # Command line arguments take precedence over config file
-    params = {
-        'output_dir': args.output_dir or config.get('output_dir', ''),
-        'llm': args.llm or config.get('llm', ''),
-        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
-        'lang': args.lang or config.get('lang', 'Chinese'),
-        'multi_language': args.multi_language or config.get('multi_language', False),
-        'chunk_length': args.chunk_length or config.get('chunk_length', 20),
-        'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
-        'timeout': args.timeout or config.get('timeout', 3600),
-        'temperature': args.temperature or config.get('temperature', 0.1),
-        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3-turbo'),
-        'output_wav': args.output_wav or config.get('output_wav', ''),
-    }
-
-    # Handle timestamp parameters
-    if args.start_time and args.end_time:
-        params['timestamp'] = parse_timestamp(args.start_time, args.end_time)
-    else:
-        params['timestamp'] = None
-
-    # Handle GUI mode
-    if args.gui:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        main_py = os.path.join(current_dir, "main.py")
-        subprocess.run(["python", main_py])
-        return
-
-    # Otherwise, run CLI mode (input must be provided)
-    if not args.input:
-        print("Error: Please specify an input file or URL.")
-        sys.exit(1)
-
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input,
-        args.input if is_url else "",
-        **params
-    )
-    print("Markdown Output:", result[0])
-    print("Markdown File:", result[1])
-    print("CSV File:", result[2])
-    print("Filename (without extension):", result[3] if result[3] is not None else "")
+    # If no subcommand is provided, show help
+    parser.print_help()
 
 
 if __name__ == "__main__":

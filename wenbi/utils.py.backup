@@ -127,10 +127,6 @@ def segment(file_path, sentence_count=20):
             from docx import Document
             doc = Document(file_path)
             text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
-        # Handle markdown files
-        elif file_path.lower().endswith(('.md', '.markdown', '.txt')):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                text = f.read()
         else:
             vtt_df = parse_subtitle(file_path)
             text = "。".join(vtt_df["Content"])
@@ -162,13 +158,6 @@ def segment(file_path, sentence_count=20):
                 current_paragraph = []
                 current_count = 0
 
-        if current_paragraph:
-            paragraphs.append("".join(current_paragraph))
-
-        return "\n\n".join(paragraphs)
-    except Exception as e:
-        print(f"Error in segment: {e}")
-        return text
         if current_paragraph:
             paragraphs.append("".join(current_paragraph))
 

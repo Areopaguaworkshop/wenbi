@@ -1,128 +1,201 @@
-# Wenbi
+# Wenbi: Intelligent Content Transformation
 
-Wenbi is a versatile tool for processing video, audio, and subtitle files. It can transcribe, translate, and rewrite content, making it easy to convert spoken language into written text.
+Wenbi is a versatile command-line interface (CLI) and web application designed to process various forms of media and text, transforming them into structured Markdown and CSV outputs. It leverages Large Language Models (LLMs) for advanced functionalities like transcription, translation, text rewriting, and academic rewriting.
 
 ## Features
 
-- **Transcription:** Convert video and audio files into text using OpenAI's Whisper models.
-- **Translation:** Translate transcribed text into a specified language.
-- **Rewriting:** Refine transcribed text into a more formal, written style.
-- **Multiple Input Formats:** Supports video files, audio files, YouTube URLs, and subtitle files.
-- **Batch Processing:** Process multiple files in a directory at once.
-- **Configuration:** Use a YAML file to define complex workflows, including processing file segments and multiple files.
-- **Gradio GUI:** Provides a graphical user interface for ease of use.
+*   **Multi-Input Support:** Process video, audio, YouTube/web URLs, VTT, SRT, ASS, SSA, SUB, SMI, TXT, Markdown, DOCX, and PDF files.
+*   **Transcription:** Convert spoken content from audio/video into text.
+*   **Translation:** Translate transcribed or existing text into a target language.
+*   **Text Rewriting:** Rewrite text, converting oral expressions to written form, with grammar correction and proofreading.
+*   **Academic Rewriting:** Transform text into a formal academic style, preserving meaning and citations.
+*   **Batch Processing:** Efficiently process multiple media files within a directory.
+*   **LLM Integration:** Seamlessly integrate with various LLMs, including:
+    *   Ollama (e.g., `ollama/qwen3`)
+    *   Gemini (e.g., `gemini/gemini-1.5-flash`)
+    *   OpenAI (e.g., `openai/gpt-4o`)
+*   **Configuration:** Flexible configuration via command-line arguments or YAML files.
+*   **Gradio GUI:** An intuitive web-based graphical user interface for easy interaction.
+*   **Multi-language Processing:** Support for processing content in multiple languages.
 
 ## Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/wenbi.git
-    cd wenbi
-    ```
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.lock
-    ```
+Wenbi uses `rye` for dependency management. To install, ensure you have `rye` installed, then clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/your-repo/wenbi.git # Replace with actual repo URL
+cd wenbi
+rye sync
+```
 
 ## Usage
 
-### `wenbi`
+### CLI (Command Line Interface)
 
-The `wenbi` command is the main entry point for the tool.
+Wenbi provides a powerful CLI for various tasks. The main entry point is `wenbi`.
 
-**Basic Usage:**
+#### Main Command
+
+Process a single input file (video, audio, URL, or text file) to generate Markdown and CSV outputs.
 
 ```bash
 wenbi <input_file_or_url> [options]
+
+# Example: Process a video file
+wenbi my_video.mp4 --output-dir ./output --lang English
+
+# Example: Process a YouTube URL
+wenbi https://www.youtube.com/watch?v=dQw4w9WgXcQ --llm gemini/gemini-1.5-flash --lang Chinese
+
+# Example: Process a VTT subtitle file
+wenbi subtitles.vtt --output-dir ./output --lang English
+
+# Example: Process a DOCX file for academic rewriting (requires --llm)
+wenbi document.docx --llm ollama/qwen3 --lang English
+
+# Example: Process a PDF file (requires --llm)
+wenbi research_paper.pdf --llm ollama/qwen3 --lang English
 ```
 
-**Arguments:**
+**Common Options:**
 
-*   `input`: Path to the input file (video, audio, or subtitle) or a URL.
+*   `-c, --config <path>`: Path to a YAML configuration file.
+*   `-o, --output-dir <path>`: Directory to save output files.
+*   `--llm <model_identifier>`: Specify the LLM model to use (e.g., `ollama/qwen3`, `gemini/gemini-1.5-flash`, `openai/gpt-4o`).
+*   `-s, --transcribe-lang <language>`: Language for transcription (e.g., `Chinese`, `English`).
+*   `-l, --lang <language>`: Target language for translation/rewriting (default: `Chinese`).
+*   `-m, --multi-language`: Enable multi-language processing.
+*   `-cl, --chunk-length <int>`: Number of sentences per paragraph (default: 8).
+*   `-mt, --max-tokens <int>`: Maximum tokens for LLM output (default: 130000).
+*   `-to, --timeout <int>`: LLM request timeout in seconds (default: 3600).
+*   `-tm, --temperature <float>`: LLM temperature parameter (default: 0.1).
+*   `-tsm, --transcribe-model <model_size>`: Whisper model size for transcription (e.g., `large-v3-turbo`).
+*   `-ow, --output_wav <filename>`: Filename for saving the segmented WAV (optional).
+*   `-st, --start_time <HH:MM:SS>`: Start time for extraction from media.
+*   `-et, --end_time <HH:MM:SS>`: End time for extraction from media.
 
-**Options:**
+#### Subcommands
 
-*   `--config, -c`: Path to a YAML configuration file.
-*   `--output-dir, -o`: Output directory.
-*   `--gui, -g`: Launch the Gradio GUI.
-*   `--rewrite_llm`: Rewrite LLM model identifier.
-*   `--translate_llm`: Translation LLM model identifier.
-*   `--transcribe-lang, -s`: Transcribe language.
-*   `--translate-lang, -t`: Target translation language (default: Chinese).
-*   `--rewrite-lang, -r`: Target language for rewriting (default: Chinese).
-*   `--academic-lang, -a`: Target language for academic writing (default: English).
-*   `--multi-language, -m`: Enable multi-language processing.
-*   `--chunk-length, -cl`: Number of sentences per paragraph for LLM processing (default: 8).
-*   `--max-tokens, -mt`: Maximum tokens for LLM output (default: 50000).
-*   `--timeout, -to`: LLM request timeout in seconds (default: 3600).
-*   `--temperature, -tm`: LLM temperature parameter (default: 0.1).
-*   `--base-url, -u`: Base URL for LLM API (default: http://localhost:11434).
-*   `--transcribe-model, -tsm`: Whisper model size for transcription (default: large-v3-turbo).
-*   `--output_wav, -ow`: Filename for saving the segmented WAV.
-*   `--start_time, -st`: Start time for extraction (format: HH:MM:SS).
-*   `--end_time, -et`: End time for extraction (format: HH:MM:SS).
+Wenbi also provides specific subcommands for `rewrite`, `translate`, and `academic` tasks.
 
-### `wenbi-batch`
+```bash
+# Rewrite text
+wenbi rewrite <input_file> --llm ollama/qwen3 --lang Chinese
 
-The `wenbi-batch` command processes all media files in a directory.
+# Translate text
+wenbi translate <input_file> --llm gemini/gemini-1.5-flash --lang French
 
-**Basic Usage:**
+# Academic rewriting
+wenbi academic <input_file> --llm openai/gpt-4o --lang English
+```
+
+Subcommands share common options with the main command.
+
+### Batch Processing
+
+Process multiple media files in a directory using `wenbi-batch`.
 
 ```bash
 wenbi-batch <input_directory> [options]
+
+# Example: Process all media files in 'my_media_folder'
+wenbi-batch my_media_folder --output-dir ./batch_output --translate-lang English
+
+# Example: Process with a config file and combine markdown outputs
+wenbi-batch my_media_folder -c config/batch-config.yml --md combined_output.md
 ```
 
-**Arguments:**
+**Batch Options:**
 
-*   `input_dir`: Input directory containing media files.
+*   `-c, --config <path>`: Path to a YAML configuration file for batch processing.
+*   `--output-dir <path>`: Output directory for batch results.
+*   `--rewrite-llm <model_id>`: LLM for rewriting.
+*   `--translate-llm <model_id>`: LLM for translation.
+*   `--transcribe-lang <language>`: Language for transcription.
+*   `--translate-lang <language>`: Target language for translation (default: `Chinese`).
+*   `--rewrite-lang <language>`: Target language for rewriting (default: `Chinese`).
+*   `--multi-language`: Enable multi-language processing.
+*   `--chunk-length <int>`: Number of sentences per chunk.
+*   `--max-tokens <int>`: Maximum tokens for LLM.
+*   `--timeout <int>`: LLM timeout in seconds.
+*   `--temperature <float>`: LLM temperature.
+*   `--md [path]`: Output combined markdown file. If no path, uses input folder name.
 
-**Options:**
+### Configuration Files (YAML)
 
-*   `--config, -c`: YAML configuration file.
-*   `--output-dir`: Output directory.
-*   `--md`: Output combined markdown file path.
+Wenbi supports YAML configuration files for both single input and batch processing. This allows for more complex and reusable configurations.
 
-### YAML Configuration
-
-The YAML configuration file allows for more complex workflows.
-
-**Example:**
+**Example `single-input.yaml`:**
 
 ```yaml
-# config/single-input.yaml
-input: "example/Phd-finalDraft-2025-07-02_split/1.wav"
-output_dir: "output"
-rewrite_llm: "mistral"
-translate_llm: "mistral"
-transcribe_lang: "en"
-translate_lang: "zh"
-rewrite_lang: "zh"
-multi_language: true
-chunk_length: 8
-max_tokens: 50000
-timeout: 3600
-temperature: 0.1
-base_url: "http://localhost:11434"
-transcribe_model: "large-v3-turbo"
+input: "path/to/your/video.mp4"
+output_dir: "./my_output"
+llm: "gemini/gemini-1.5-flash"
+lang: "English"
+chunk_length: 10
 ```
 
-**To use the config file:**
+**Example `multiple-inputs.yaml` (for `wenbi` main command):**
+
+```yaml
+inputs:
+  - input: "path/to/video1.mp4"
+    segments:
+      - start_time: "00:00:10"
+        end_time: "00:00:30"
+        title: "Introduction"
+      - start_time: "00:01:00"
+        end_time: "00:01:30"
+        title: "Key Points"
+  - input: "path/to/audio.mp3"
+    llm: "ollama/qwen3"
+    lang: "Chinese"
+```
+
+**Example `batch-folder-config.yml` (for `wenbi-batch`):**
+
+```yaml
+output_dir: "./batch_results"
+translate_llm: "gemini/gemini-1.5-flash"
+translate_lang: "French"
+chunk_length: 12
+```
+
+### Gradio GUI
+
+Launch the web-based Gradio interface for an interactive experience:
 
 ```bash
-wenbi --config config/single-input.yaml
+wenbi --gui
 ```
 
-### `mini.py`
+## Supported Input Types
 
-The `mini.py` script is a simple tool for processing subtitle files.
+*   **Video:** `.mp4`, `.avi`, `.mov`, `.mkv`, `.flv`, `.wmv`, `.m4v`, `.webm`
+*   **Audio:** `.mp3`, `.flac`, `.aac`, `.ogg`, `.m4a`, `.opus`
+*   **URLs:** YouTube and other web URLs.
+*   **Subtitle Files:** `.vtt`, `.srt`, `.ass`, `.ssa`, `.sub`, `.smi`
+*   **Text Files:** `.txt`, `.md`, `.markdown`
+*   **Document Files:** `.docx`, `.pdf`
 
-**Usage:**
+## Output
 
-```bash
-python mini.py <subtitle_file> [-s <sentence_count>]
-```
+Wenbi generates the following output files:
 
-**Arguments:**
+*   **Markdown (`.md`):** Contains the processed text (transcribed, translated, rewritten, or academic).
+*   **CSV (`.csv`):** For transcribed content, provides a structured breakdown of segments and timestamps.
+*   **Comparison Markdown (`_compare.md`):** For academic rewriting, a markdown file showing changes between original and academic text (requires `redlines` library).
 
-*   `file`: Path to the subtitle file.
-*   `--sentences, -s`: Maximum sentences per paragraph (default: 10).
+## LLM Integration
+
+Wenbi uses `dspy` for LLM integration, allowing flexibility in choosing your preferred model. Ensure your environment variables are set for API keys if using commercial LLMs (e.g., `OPENAI_API_KEY`, `GOOGLE_API_KEY`).
+
+To use Ollama models, ensure your Ollama server is running locally.
+
+## Contributing
+
+Contributions are welcome! Please refer to the `CONTRIBUTING.md` (if available) for guidelines on how to contribute to this project. If not, please open an issue to discuss your proposed changes.
+
+## License
+
+This project is licensed under the Apache-2.0 License. See the `LICENSE` file for details.))
