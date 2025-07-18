@@ -1,4 +1,4 @@
-# 🎬 Wenbi: Intelligent Audio/Video to Academic Text Transformation
+# 🎬 Wenbi: Intelligent Media-to-Text and Text-to-Text Processing
 
 **Transform your audio and video content into polished, academic-quality written documents with AI precision!**
 
@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.140.72-orange.svg)](pyproject.toml)
 
-Wenbi is a revolutionary CLI tool and web application that bridges the gap between spoken content and professional written communication. Whether you're a researcher, student, content creator, or professional, Wenbi transforms your raw audio/video content into beautifully formatted, academically rigorous documents.
+Wenbi is a revolutionary CLI tool and web application that **focuses on media-to-text and text-to-text processing**. Whether you're a researcher, student, content creator, or professional, Wenbi transforms your raw audio/video content and existing text documents into beautifully formatted, academically rigorous documents.
 
 ## ✨ Why Wenbi?
 
@@ -36,7 +36,7 @@ Wenbi is a revolutionary CLI tool and web application that bridges the gap betwe
 ### 🔧 **Professional Workflow Tools**
 - **Batch Processing**: Process entire directories of media files with `wenbi-batch`
 - **Flexible Configuration**: YAML-based configurations for complex, repeatable workflows
-- **Document Processing**: Handle PDF research papers and DOCX documents
+- **Document Processing**: Handle DOCX documents and various text formats
 - **Web Interface**: Beautiful Gradio GUI for non-technical users
 - **Multi-language Intelligence**: Automatic language detection and cross-lingual processing
 
@@ -73,14 +73,34 @@ wenbi research_video.mp4 --multi-language --translate-lang English --rewrite-lan
 
 ### Prerequisites
 - Python 3.10+ 
-- [Rye](https://rye.astral.sh/) package manager
 - For commercial LLMs: API keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`)
 - For local LLMs: [Ollama](https://ollama.ai/) installation
 
 ### Installation
 
+Wenbi can be installed using multiple package managers:
+
+#### **📦 Install with pip (recommended)**
 ```bash
-# Clone the repository
+# Install from PyPI
+pip install wenbi
+
+# Quick test - process a subtitle file with timestamps
+wenbi your_subtitle.vtt --cite-timestamps --llm gemini/gemini-1.5-flash
+```
+
+#### **⚡ Install with uv (fastest)**
+```bash
+# Install with uv for fastest installation
+uv pip install wenbi
+
+# Quick test
+wenbi your_content.mp4 --cite-timestamps --llm gemini/gemini-1.5-flash
+```
+
+#### **🔧 Development installation with Rye**
+```bash
+# Clone the repository for development
 git clone https://github.com/your-repo/wenbi.git # Replace with actual repo URL
 cd wenbi
 
@@ -137,9 +157,6 @@ wenbi subtitles.vtt --output-dir ./output --lang English
 
 # Example: Process a DOCX file for academic rewriting (requires --llm)
 wenbi document.docx --llm ollama/qwen3 --lang English
-
-# Example: Process a PDF file (requires --llm)
-wenbi research_paper.pdf --llm ollama/qwen3 --lang English
 ```
 
 **Common Options:**
@@ -311,12 +328,14 @@ translated = translate(
 
 ## Supported Input Types
 
+**Wenbi focuses on media-to-text and text-to-text processing:**
+
 *   **Video:** `.mp4`, `.avi`, `.mov`, `.mkv`, `.flv`, `.wmv`, `.m4v`, `.webm`
 *   **Audio:** `.mp3`, `.flac`, `.aac`, `.ogg`, `.m4a`, `.opus`
 *   **URLs:** YouTube and other web URLs.
 *   **Subtitle Files:** `.vtt`, `.srt`, `.ass`, `.ssa`, `.sub`, `.smi`
 *   **Text Files:** `.txt`, `.md`, `.markdown`
-*   **Document Files:** `.docx`, `.pdf`
+*   **Document Files:** `.docx`
 
 ## Output
 

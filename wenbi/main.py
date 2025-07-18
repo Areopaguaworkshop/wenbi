@@ -6,7 +6,6 @@ from wenbi.utils import (
     download_audio,
 )
 from wenbi.model import rewrite, translate, process_docx, academic
-from wenbi.pdf_processor import convert_pdf_to_markdown
 import os
 import gradio as gr
 import sys
@@ -32,18 +31,12 @@ def is_video_audio_or_url(file_path, url):
     return False
 
 
-def is_pdf_file(file_path):
-    """Check if input is a PDF file"""
-    if not file_path:
-        return False
-    return file_path.lower().endswith('.pdf')
-
 def is_text_file(file_path):
-    """Check if input is VTT, markdown, docx, or PDF file"""
+    """Check if input is VTT, markdown, or docx file"""
     if not file_path:
         return False
     
-    text_extensions = ('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt', '.md', '.markdown', '.docx', '.pdf')
+    text_extensions = ('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt', '.md', '.markdown', '.docx')
     return file_path.lower().endswith(text_extensions)
 
 
@@ -65,10 +58,9 @@ def process_input(
     subcommand=None,  # New parameter to specify which subcommand to use
     cite_timestamps=False,  # New parameter for timestamp citation
 ):
-    """Process input with new logic:
+    """Process input with logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
-    2. If input is PDF: convert to markdown -> process with subcommand
-    3. If input is VTT/markdown/docx: directly process with subcommand
+    2. If input is VTT/markdown/docx: directly process with subcommand
     """
     # Use current directory for CLI, package directory for web interface
     out_dir = (
@@ -183,65 +175,6 @@ def process_input(
         else:
             # Original behavior for backward compatibility
             return _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language)
-
-    # Check if input is PDF file
-    elif is_pdf_file(file_path):
-        if subcommand:
-            # Step 1: Convert PDF to markdown
-            try:
-                markdown_file = convert_pdf_to_markdown(file_path, out_dir)
-            except Exception as e:
-                print(f"Error converting PDF to markdown: {e}")
-                return "Error: Failed to convert PDF to markdown", None, None, None
-            
-            # Step 2: Process markdown file with subcommand
-            try:
-                if subcommand == "translate":
-                    result = translate(
-                        markdown_file,
-                        output_dir=out_dir,
-                        translate_language=lang,
-                        llm=llm,
-                        chunk_length=chunk_length,
-                        max_tokens=max_tokens,
-                        timeout=timeout,
-                        temperature=temperature,
-                        cite_timestamps=cite_timestamps,
-                    )
-                elif subcommand == "rewrite":
-                    result = rewrite(
-                        markdown_file,
-                        output_dir=out_dir,
-                        llm=llm,
-                        rewrite_lang=lang,
-                        chunk_length=chunk_length,
-                        max_tokens=max_tokens,
-                        timeout=timeout,
-                        temperature=temperature,
-                        cite_timestamps=cite_timestamps,
-                    )
-                elif subcommand == "academic":
-                    result = academic(
-                        markdown_file,
-                        output_dir=out_dir,
-                        llm=llm,
-                        academic_lang=lang,
-                        chunk_length=chunk_length,
-                        max_tokens=max_tokens,
-                        timeout=timeout,
-                        temperature=temperature,
-                        cite_timestamps=cite_timestamps,
-                    )
-                else:
-                    return "Error: Unknown subcommand", None, None, None
-                
-                base_name = os.path.splitext(os.path.basename(file_path))[0]
-                return result, result, None, base_name
-            except Exception as e:
-                print(f"Error processing PDF with {subcommand}: {e}")
-                return f"Error: Failed during {subcommand} processing", None, None, None
-        else:
-            return "Error: PDF files require a subcommand (translate, rewrite, or academic)", None, None, None
 
     # Check if input is text file (VTT, markdown, docx)
     elif is_text_file(file_path):
