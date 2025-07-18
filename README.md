@@ -1,32 +1,117 @@
-# Wenbi: Intelligent Content Transformation
+# 🎬 Wenbi: Intelligent Audio/Video to Academic Text Transformation
 
-Wenbi is a versatile command-line interface (CLI) and web application designed to process various forms of media and text, transforming them into structured Markdown and CSV outputs. It leverages Large Language Models (LLMs) for advanced functionalities like transcription, translation, text rewriting, and academic rewriting.
+**Transform your audio and video content into polished, academic-quality written documents with AI precision!**
 
-## Features
+[![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.140.72-orange.svg)](pyproject.toml)
 
-*   **Multi-Input Support:** Process video, audio, YouTube/web URLs, VTT, SRT, ASS, SSA, SUB, SMI, TXT, Markdown, DOCX, and PDF files.
-*   **Transcription:** Convert spoken content from audio/video into text.
-*   **Translation:** Translate transcribed or existing text into a target language.
-*   **Text Rewriting:** Rewrite text, converting oral expressions to written form, with grammar correction and proofreading.
-*   **Academic Rewriting:** Transform text into a formal academic style, preserving meaning and citations.
-*   **Batch Processing:** Efficiently process multiple media files within a directory.
-*   **LLM Integration:** Seamlessly integrate with various LLMs, including:
-    *   Ollama (e.g., `ollama/qwen3`)
-    *   Gemini (e.g., `gemini/gemini-1.5-flash`)
-    *   OpenAI (e.g., `openai/gpt-4o`)
-*   **Configuration:** Flexible configuration via command-line arguments or YAML files.
-*   **Gradio GUI:** An intuitive web-based graphical user interface for easy interaction.
-*   **Multi-language Processing:** Support for processing content in multiple languages.
+Wenbi is a revolutionary CLI tool and web application that bridges the gap between spoken content and professional written communication. Whether you're a researcher, student, content creator, or professional, Wenbi transforms your raw audio/video content into beautifully formatted, academically rigorous documents.
 
-## Installation
+## ✨ Why Wenbi?
 
-Wenbi uses `rye` for dependency management. To install, ensure you have `rye` installed, then clone the repository and install dependencies:
+**🎯 From Speech to Scholarship**: Convert lectures, interviews, podcasts, and presentations into publication-ready academic texts
+
+**🌍 Universal Language Bridge**: Seamlessly translate and adapt content across languages while maintaining academic integrity
+
+**📝 Intelligent Rewriting**: Transform casual speech patterns into formal, written expression with perfect grammar and flow
+
+**⏱️ Time-Stamped Precision**: Maintain full traceability with timestamp citations linking back to original audio/video sources
+
+**🧠 LLM-Powered Excellence**: Harness the power of multiple AI models (OpenAI GPT, Google Gemini, Ollama) for superior results
+
+## 🚀 Core Features
+
+### 📹 **Multimedia Processing Powerhouse**
+- **Universal Input Support**: Seamlessly handle videos (MP4, AVI, MOV, MKV), audio files (MP3, FLAC, AAC), YouTube URLs, and subtitle files (VTT, SRT, ASS)
+- **Advanced Transcription**: Powered by OpenAI Whisper with configurable model sizes (large-v3-turbo recommended)
+- **Time-Stamped Output**: NEW! `--cite-timestamps` feature maintains precise traceability with markdown headers showing exact time ranges
+
+### 🧠 **AI-Powered Text Transformation**
+- **Intelligent Rewriting**: Transform casual spoken language into polished written prose
+- **Academic Excellence**: Elevate content to publication-quality academic standards with proper citations and formal structure
+- **Smart Translation**: Contextually accurate translations that preserve meaning and academic integrity
+- **Multi-LLM Support**: Choose from OpenAI GPT-4, Google Gemini, or local Ollama models
+
+### 🔧 **Professional Workflow Tools**
+- **Batch Processing**: Process entire directories of media files with `wenbi-batch`
+- **Flexible Configuration**: YAML-based configurations for complex, repeatable workflows
+- **Document Processing**: Handle PDF research papers and DOCX documents
+- **Web Interface**: Beautiful Gradio GUI for non-technical users
+- **Multi-language Intelligence**: Automatic language detection and cross-lingual processing
+
+## 💼 Real-World Use Cases
+
+### 🎓 **Academic Research**
+```bash
+# Transform lecture recordings into formatted academic notes with timestamps
+wenbi lecture_recording.mp4 --llm gemini/gemini-2.0-flash --cite-timestamps --output-dir ./course_notes
+
+# Convert research interview to academic paper format
+wenbi interview.mp3 academic --llm openai/gpt-4o --lang English
+```
+
+### 📚 **Content Creation**
+```bash
+# Turn podcast episodes into blog posts
+wenbi podcast_episode.mp3 rewrite --llm ollama/qwen3 --lang English --chunk-length 6
+
+# Process YouTube educational content for documentation
+wenbi "https://youtube.com/watch?v=example" --llm gemini/gemini-1.5-flash --cite-timestamps
+```
+
+### 🌐 **International Collaboration**
+```bash
+# Translate conference presentations with academic precision
+wenbi conference_talk.mp4 translate --llm gemini/gemini-2.0-flash --lang French --cite-timestamps
+
+# Process multilingual research materials
+wenbi research_video.mp4 --multi-language --translate-lang English --rewrite-lang Chinese
+```
+
+## ⚡ Quick Start
+
+### Prerequisites
+- Python 3.10+ 
+- [Rye](https://rye.astral.sh/) package manager
+- For commercial LLMs: API keys (`OPENAI_API_KEY`, `GOOGLE_API_KEY`)
+- For local LLMs: [Ollama](https://ollama.ai/) installation
+
+### Installation
 
 ```bash
+# Clone the repository
 git clone https://github.com/your-repo/wenbi.git # Replace with actual repo URL
 cd wenbi
+
+# Install dependencies with Rye
 rye sync
+
+# Activate the virtual environment
+rye shell
+
+# Quick test - process a subtitle file with timestamps
+wenbi your_subtitle.vtt --cite-timestamps --llm gemini/gemini-1.5-flash
 ```
+
+### 🎯 **NEW: Timestamp Citation Feature**
+
+The `--cite-timestamps` option transforms your output with precise time-stamped sections:
+
+**Input**: Regular VTT/SRT subtitle file  
+**Output**: Markdown with timestamp headers
+
+```markdown
+### **00:00:00 - 00:00:23**
+
+This introductory section discusses the fundamental concepts of the topic, establishing the theoretical framework that will guide our understanding throughout the presentation.
+
+### **00:00:23 - 00:00:45**
+
+The speaker then transitions to examining the practical applications, demonstrating how these theoretical principles manifest in real-world scenarios.
+```
+
+**Perfect for**: Academic note-taking, research documentation, content verification, and creating citeable references to audio/video sources!
 
 ## Usage
 
@@ -62,6 +147,7 @@ wenbi research_paper.pdf --llm ollama/qwen3 --lang English
 *   `-c, --config <path>`: Path to a YAML configuration file.
 *   `-o, --output-dir <path>`: Directory to save output files.
 *   `--llm <model_identifier>`: Specify the LLM model to use (e.g., `ollama/qwen3`, `gemini/gemini-1.5-flash`, `openai/gpt-4o`).
+*   `--cite-timestamps`: **NEW!** Include precise timestamp headers in output markdown (format: `### **HH:MM:SS - HH:MM:SS**`)
 *   `-s, --transcribe-lang <language>`: Language for transcription (e.g., `Chinese`, `English`).
 *   `-l, --lang <language>`: Target language for translation/rewriting (default: `Chinese`).
 *   `-m, --multi-language`: Enable multi-language processing.
@@ -169,6 +255,60 @@ Launch the web-based Gradio interface for an interactive experience:
 wenbi --gui
 ```
 
+### 🐍 Programmatic Usage (Python API)
+
+Wenbi can be used as a Python library for integration into your own applications:
+
+```python
+from wenbi.main import process_input
+from wenbi.model import rewrite, translate, academic
+from wenbi.utils import transcribe, parse_subtitle
+
+# Process a video file with timestamp citations
+result = process_input(
+    file_path="lecture.mp4",
+    llm="gemini/gemini-1.5-flash",
+    subcommand="academic",
+    lang="English",
+    cite_timestamps=True,
+    output_dir="./output"
+)
+
+# Direct text processing
+academic_text = academic(
+    "input.vtt",
+    output_dir="./output",
+    llm="openai/gpt-4o",
+    academic_lang="English",
+    cite_timestamps=True
+)
+
+# Transcribe audio/video to VTT
+vtt_file, csv_file = transcribe(
+    "audio.mp3",
+    language="English",
+    output_dir="./output",
+    model_size="large-v3-turbo"
+)
+
+# Translate existing text
+translated = translate(
+    "document.txt",
+    output_dir="./output",
+    translate_language="French",
+    llm="gemini/gemini-2.0-flash",
+    cite_timestamps=False
+)
+```
+
+**Key Functions:**
+- `process_input()`: Main processing pipeline
+- `transcribe()`: Audio/video to text transcription
+- `rewrite()`: Oral to written text transformation  
+- `translate()`: Language translation
+- `academic()`: Academic style transformation
+- `parse_subtitle()`: Process existing subtitle files
+
 ## Supported Input Types
 
 *   **Video:** `.mp4`, `.avi`, `.mov`, `.mkv`, `.flv`, `.wmv`, `.m4v`, `.webm`
@@ -192,10 +332,46 @@ Wenbi uses `dspy` for LLM integration, allowing flexibility in choosing your pre
 
 To use Ollama models, ensure your Ollama server is running locally.
 
-## Contributing
+## 👥 Community & Contributing
 
-Contributions are welcome! Please refer to the `CONTRIBUTING.md` (if available) for guidelines on how to contribute to this project. If not, please open an issue to discuss your proposed changes.
+**Join the Wenbi Community!** We're building the future of audio/video to academic text transformation.
 
-## License
+### 🚀 Ways to Contribute
 
-This project is licensed under the Apache-2.0 License. See the `LICENSE` file for details.))
+- **📝 Submit Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/your-repo/wenbi/issues)
+- **🔧 Code Contributions**: Improve transcription accuracy, add new LLM integrations, or enhance the timestamp citation system
+- **🌍 Translations**: Help us support more languages for global accessibility
+- **📚 Documentation**: Improve guides, add examples, or create tutorials
+- **⭐ Share**: Star the project and share with researchers, educators, and content creators
+
+### 💬 Get Help & Connect
+
+- **GitHub Issues**: Technical support and bug reports
+- **Discussions**: Share use cases, tips, and feature ideas
+- **Documentation**: Check our examples and configuration guides
+
+### 🎯 Roadmap & Future Features
+
+- Real-time processing for live streams
+- Enhanced speaker identification and diarization
+- Academic citation format exports (APA, MLA, Chicago)
+- Integration with reference managers (Zotero, Mendeley)
+- REST API server for enterprise deployments
+- Advanced academic writing enhancement features
+
+## 📜 License
+
+This project is licensed under the **Apache-2.0 License** - see the [`LICENSE`](LICENSE) file for details.
+
+---
+
+**✨ Ready to transform your audio/video content into academic excellence?**
+
+**Get started today:**
+```bash
+git clone https://github.com/your-repo/wenbi.git
+cd wenbi && rye sync && rye shell
+wenbi your_content.mp4 --cite-timestamps --llm gemini/gemini-1.5-flash
+```
+
+**🌟 Star this project if you find it useful and help us build the future of academic content creation!**
