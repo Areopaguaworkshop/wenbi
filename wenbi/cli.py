@@ -201,6 +201,7 @@ def handle_rewrite_command(args):
         'multi_language': args.multi_language or config.get('multi_language', False),
         'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
         'output_wav': args.output_wav or config.get('output_wav', ''),
+        'cite_timestamps': args.cite_timestamps or config.get('cite_timestamps', False),
     }
 
     # Handle timestamp parameters
@@ -248,6 +249,7 @@ def handle_translate_command(args):
         'multi_language': args.multi_language or config.get('multi_language', False),
         'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
         'output_wav': args.output_wav or config.get('output_wav', ''),
+        'cite_timestamps': args.cite_timestamps or config.get('cite_timestamps', False),
     }
 
     # Handle timestamp parameters
@@ -295,6 +297,7 @@ def handle_academic_command(args):
         'multi_language': args.multi_language or config.get('multi_language', False),
         'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
         'output_wav': args.output_wav or config.get('output_wav', ''),
+        'cite_timestamps': args.cite_timestamps or config.get('cite_timestamps', False),
     }
 
     # Handle timestamp parameters
@@ -361,6 +364,8 @@ def main():
                              help="Start time for extraction (format: HH:MM:SS)")
         subparser.add_argument("--end-time", "-et", default="", 
                              help="End time for extraction (format: HH:MM:SS)")
+        subparser.add_argument("--cite-timestamps", action="store_true", default=False,
+                             help="Include timestamps as headers in markdown output for traceability")
 
     # Rewrite subcommand
     rewrite_parser = subparsers.add_parser('rewrite', aliases=['rw'], help='Rewrite text')

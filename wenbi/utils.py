@@ -119,9 +119,19 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
     return out_file, detected_language
 
 
-def segment(file_path, sentence_count=20):
-    """Segments a text file into paragraphs by grouping every N sentences."""
+def segment(file_path, sentence_count=20, cite_timestamps=False):
+    """Segments a text file into paragraphs by grouping every N sentences.
+    
+    Args:
+        file_path (str): Path to the input file
+        sentence_count (int): Number of sentences per paragraph
+        cite_timestamps (bool): Whether to include timestamps as headers in output
+    """
     try:
+        # Check if cite_timestamps is requested for non-timestamp files
+        if cite_timestamps and not file_path.lower().endswith(('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi')):
+            raise ValueError("Error: --cite-timestamps can only be used with files that have timestamps (VTT, SRT, ASS, SSA, SUB, SMI)")
+        
         # Handle docx files
         if file_path.lower().endswith('.docx'):
             from docx import Document
@@ -132,8 +142,16 @@ def segment(file_path, sentence_count=20):
             with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
         else:
+            # Handle subtitle files
             vtt_df = parse_subtitle(file_path)
-            text = "。".join(vtt_df["Content"])
+            if cite_timestamps:
+                # Check for missing or corrupted timestamps
+                if 'Timestamps' not in vtt_df.columns or vtt_df['Timestamps'].isnull().any() or vtt_df['Timestamps'].eq('').any():
+                    raise ValueError("Error: Timestamps missing or corrupted for cite_timestamps option.")
+                
+                return _segment_with_timestamps(vtt_df, sentence_count)
+            else:
+                text = "。".join(vtt_df["Content"])
 
         # Directly use basic language classes
         if any(char in text for char in "，。？！"):
@@ -166,16 +184,106 @@ def segment(file_path, sentence_count=20):
             paragraphs.append("".join(current_paragraph))
 
         return "\n\n".join(paragraphs)
+        
     except Exception as e:
         print(f"Error in segment: {e}")
-        return text
-        if current_paragraph:
-            paragraphs.append("".join(current_paragraph))
+        # Return the original text if processing fails
+        if file_path.lower().endswith(('.docx', '.md', '.markdown', '.txt')):
+            try:
+                if file_path.lower().endswith('.docx'):
+                    from docx import Document
+                    doc = Document(file_path)
+                    return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+                else:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        return f.read()
+            except:
+                return "Error reading file"
+        else:
+            try:
+                vtt_df = parse_subtitle(file_path)
+                return "。".join(vtt_df["Content"])
+            except:
+                return "Error reading subtitle file"
 
-        return "\n\n".join(paragraphs)
-    except Exception as e:
-        print(f"Error in segment: {e}")
-        return text
+
+def _segment_with_timestamps(vtt_df, sentence_count):
+    """Helper function to segment subtitle content with timestamps."""
+    # Convert timestamp format to HH:MM:SS
+    def format_timestamp(timestamp_str):
+        # Extract start time from timestamp (format: "HH:MM:SS.mmm --> HH:MM:SS.mmm")
+        if "-->" in timestamp_str:
+            parts = timestamp_str.split("-->")
+            start_time = parts[0].strip()
+            end_time = parts[1].strip()
+            # Convert to seconds format (remove milliseconds)
+            start_time = start_time.split('.')[0] if '.' in start_time else start_time.split(',')[0]
+            end_time = end_time.split('.')[0] if '.' in end_time else end_time.split(',')[0]
+            return start_time, end_time
+        return timestamp_str, timestamp_str
+    
+    # Handle cases where we have empty or corrupted data
+    if vtt_df.empty or 'Content' not in vtt_df.columns or 'Timestamps' not in vtt_df.columns:
+        return "Error: No valid content or timestamps found"
+    
+    # Group content by sentences
+    all_content = []
+    all_timestamps = []
+    
+    for idx, row in vtt_df.iterrows():
+        content = row['Content'].strip() if pd.notna(row['Content']) else ''
+        timestamp = row['Timestamps'] if pd.notna(row['Timestamps']) else ''
+        
+        if content and timestamp:
+            # Split content into sentences for proper grouping
+            sentences = re.split(r'[。！？.!?]', content)
+            sentences = [s.strip() for s in sentences if s.strip()]
+            
+            # If no sentences found, treat whole content as one sentence
+            if not sentences:
+                sentences = [content]
+            
+            for sentence in sentences:
+                if sentence:
+                    all_content.append(sentence)
+                    all_timestamps.append(timestamp)
+    
+    # If no content found, return error
+    if not all_content:
+        return "Error: No valid content found for processing"
+    
+    # Group into chunks based on sentence_count
+    output_chunks = []
+    current_chunk = []
+    chunk_start_time = None
+    chunk_end_time = None
+    
+    for i, (content, timestamp) in enumerate(zip(all_content, all_timestamps)):
+        if len(current_chunk) == 0:
+            # Start new chunk
+            chunk_start_time, _ = format_timestamp(timestamp)
+        
+        current_chunk.append(content)
+        _, chunk_end_time = format_timestamp(timestamp)
+        
+        # Check if we should close this chunk
+        if len(current_chunk) >= sentence_count or i == len(all_content) - 1:
+            # Format chunk content
+            chunk_content = "。".join(current_chunk)
+            if not chunk_content.endswith(('。', '！', '？', '.', '!', '?')):
+                chunk_content += "。"
+            
+            # Create timestamp header
+            timestamp_header = f"### **{chunk_start_time} - {chunk_end_time}**"
+            
+            # Add to output
+            output_chunks.append(f"{timestamp_header}\n\n{chunk_content}")
+            
+            # Reset for next chunk
+            current_chunk = []
+            chunk_start_time = None
+    
+    return "\n\n".join(output_chunks)
 
 
 def download_audio(url, output_dir=None, timestamp=None, output_wav=None):

@@ -57,10 +57,10 @@ def translate(
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
+    cite_timestamps=False,
 ):
-    segmented_text = segment(vtt_path, sentence_count=chunk_length)
-    paragraphs = segmented_text.split("\n\n")
-
+    segmented_text = segment(vtt_path, sentence_count=chunk_length, cite_timestamps=cite_timestamps)
+    
     # Use translate_llm if provided, otherwise fall back to llm
     model_id = translate_llm or llm or "ollama/qwen3"
     configure_lm(model_id, max_tokens=max_tokens, timeout_s=timeout, temperature=temperature)
@@ -74,14 +74,47 @@ def translate(
     translator = dspy.ChainOfThought(Translate)
     translated_pairs = []
 
-    for para in paragraphs:
-        if para.strip():
-            response = translator(english_text=para)
-            translated_pairs.append(
-                f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
-            )
-
-    markdown_content = "\n".join(translated_pairs)
+    if cite_timestamps:
+        # Handle timestamp sections specially
+        sections = segmented_text.split("\n\n")
+        
+        for section in sections:
+            if section.strip():
+                # Check if this section starts with a timestamp header
+                if section.startswith("### **") and "**" in section:
+                    # Extract timestamp header and content
+                    lines = section.split("\n")
+                    timestamp_header = lines[0] if lines else ""
+                    content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+                    
+                    if content:
+                        # Translate only the content, not the timestamp header
+                        response = translator(english_text=content)
+                        translated_pairs.append(
+                            f"{timestamp_header}\n\n# Original\n{content}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
+                        )
+                    else:
+                        translated_pairs.append(f"{timestamp_header}\n\n---\n")
+                else:
+                    # Regular paragraph without timestamp header
+                    response = translator(english_text=section)
+                    translated_pairs.append(
+                        f"# Original\n{section}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
+                    )
+        
+        markdown_content = "\n".join(translated_pairs)
+    else:
+        # Original behavior for non-timestamp processing
+        paragraphs = segmented_text.split("\n\n")
+        for para in paragraphs:
+            if para.strip():
+                response = translator(english_text=para)
+                translated_pairs.append(
+                    f"# English\n{para}\n\n# {translate_language}\n{response.translated_text}\n\n---\n"
+                )
+        
+        markdown_content = "\n".join(translated_pairs)
+    
     output_file = os.path.splitext(vtt_path)[0] + "_bilingual.md"
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(markdown_content)
@@ -99,32 +132,87 @@ def rewrite(
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
+    cite_timestamps=False,
 ):
-    segmented_text = segment(file_path, sentence_count=chunk_length)
-    paragraphs = segmented_text.split("\n\n")
-
+    segmented_text = segment(file_path, sentence_count=chunk_length, cite_timestamps=cite_timestamps)
+    
     # Use rewrite_llm if provided, otherwise fall back to llm
     model_id = rewrite_llm or llm or "ollama/qwen3"
     configure_lm(model_id, max_tokens=max_tokens, timeout_s=timeout, temperature=temperature)
 
-    rewritten_paragraphs = []
-    for para in paragraphs:
-        class ParaRewrite(dspy.Signature):
-            """
-            Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
-            while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
-            """
-            text: str = dspy.InputField(
-                desc=f"Spoken text to rewrite in {rewrite_lang}"
-            )
-            rewritten: str = dspy.OutputField(
-                desc=f"Rewritten paragraph in {rewrite_lang}"
-            )
-        rewrite = dspy.ChainOfThought(ParaRewrite)
-        response = rewrite(text=para)
-        rewritten_paragraphs.append(response.rewritten)
-
-    rewritten_text = "\n\n".join(rewritten_paragraphs)
+    if cite_timestamps:
+        # Handle timestamp sections specially
+        rewritten_paragraphs = []
+        sections = segmented_text.split("\n\n")
+        
+        for section in sections:
+            if section.strip():
+                # Check if this section starts with a timestamp header
+                if section.startswith("### **") and "**" in section:
+                    # Extract timestamp header and content
+                    lines = section.split("\n")
+                    timestamp_header = lines[0] if lines else ""
+                    content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+                    
+                    if content:
+                        # Rewrite only the content, not the timestamp header
+                        class ParaRewrite(dspy.Signature):
+                            """
+                            Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
+                            while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
+                            """
+                            text: str = dspy.InputField(
+                                desc=f"Spoken text to rewrite in {rewrite_lang}"
+                            )
+                            rewritten: str = dspy.OutputField(
+                                desc=f"Rewritten paragraph in {rewrite_lang}"
+                            )
+                        rewrite = dspy.ChainOfThought(ParaRewrite)
+                        response = rewrite(text=content)
+                        rewritten_paragraphs.append(f"{timestamp_header}\n\n{response.rewritten}")
+                    else:
+                        rewritten_paragraphs.append(timestamp_header)
+                else:
+                    # Regular paragraph without timestamp header
+                    class ParaRewrite(dspy.Signature):
+                        """
+                        Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
+                        while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
+                        """
+                        text: str = dspy.InputField(
+                            desc=f"Spoken text to rewrite in {rewrite_lang}"
+                        )
+                        rewritten: str = dspy.OutputField(
+                            desc=f"Rewritten paragraph in {rewrite_lang}"
+                        )
+                    rewrite = dspy.ChainOfThought(ParaRewrite)
+                    response = rewrite(text=section)
+                    rewritten_paragraphs.append(response.rewritten)
+        
+        rewritten_text = "\n\n".join(rewritten_paragraphs)
+    else:
+        # Original behavior for non-timestamp processing
+        paragraphs = segmented_text.split("\n\n")
+        rewritten_paragraphs = []
+        for para in paragraphs:
+            if para.strip():
+                class ParaRewrite(dspy.Signature):
+                    """
+                    Rewrite this text in {rewrite_lang}, add punctuation, grammar corrected, proofread, converting from spoken to written form
+                    while preserving the meaning. Ensure the rewritten text is at least 95% of the original length.
+                    """
+                    text: str = dspy.InputField(
+                        desc=f"Spoken text to rewrite in {rewrite_lang}"
+                    )
+                    rewritten: str = dspy.OutputField(
+                        desc=f"Rewritten paragraph in {rewrite_lang}"
+                    )
+                rewrite = dspy.ChainOfThought(ParaRewrite)
+                response = rewrite(text=para)
+                rewritten_paragraphs.append(response.rewritten)
+        
+        rewritten_text = "\n\n".join(rewritten_paragraphs)
+    
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         out_file = os.path.join(output_dir, f"{base_name}_rewritten.md")
@@ -145,38 +233,99 @@ def academic(
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
+    cite_timestamps=False,
 ):
     # Read the original text
-    segmented_text = segment(file_path, sentence_count=chunk_length)
-    paragraphs = segmented_text.split("\n\n")
-
+    segmented_text = segment(file_path, sentence_count=chunk_length, cite_timestamps=cite_timestamps)
+    
     model_id = llm if llm else "ollama/qwen3"
     configure_lm(model_id, max_tokens=max_tokens, timeout_s=timeout, temperature=temperature)
 
-    academic_paragraphs = []
-    for para in paragraphs:
-        if para.strip():  # Skip empty paragraphs
-            class AcademicRewrite(dspy.Signature):
-                """
-                Rewrite this text in formal academic style in {academic_lang}. Focus on:
-                1. Using scholarly vocabulary and formal language
-                2. keep the original meaning intact and 96% of same length of words.
-                3. Do not change the citation format.
-                4. Avoiding colloquialisms and informal expressions
-                5. Ensuring logical flow and academic structure
-                """
-                text: str = dspy.InputField(
-                    desc=f"Text to rewrite in academic {academic_lang}"
-                )
-                academic: str = dspy.OutputField(
-                    desc=f"Academic rewritten text in {academic_lang}"
-                )
+    if cite_timestamps:
+        # Handle timestamp sections specially
+        academic_paragraphs = []
+        sections = segmented_text.split("\n\n")
+        
+        for section in sections:
+            if section.strip():
+                # Check if this section starts with a timestamp header
+                if section.startswith("### **") and "**" in section:
+                    # Extract timestamp header and content
+                    lines = section.split("\n")
+                    timestamp_header = lines[0] if lines else ""
+                    content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+                    
+                    if content:
+                        # Rewrite only the content, not the timestamp header
+                        class AcademicRewrite(dspy.Signature):
+                            """
+                            Rewrite this text in formal academic style in {academic_lang}. Focus on:
+                            1. Using scholarly vocabulary and formal language
+                            2. keep the original meaning intact and 96% of same length of words.
+                            3. Do not change the citation format.
+                            4. Avoiding colloquialisms and informal expressions
+                            5. Ensuring logical flow and academic structure
+                            """
+                            text: str = dspy.InputField(
+                                desc=f"Text to rewrite in academic {academic_lang}"
+                            )
+                            academic: str = dspy.OutputField(
+                                desc=f"Academic rewritten text in {academic_lang}"
+                            )
+                        academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
+                        response = academic_rewrite(text=content)
+                        academic_paragraphs.append(f"{timestamp_header}\n\n{response.academic}")
+                    else:
+                        academic_paragraphs.append(timestamp_header)
+                else:
+                    # Regular paragraph without timestamp header
+                    class AcademicRewrite(dspy.Signature):
+                        """
+                        Rewrite this text in formal academic style in {academic_lang}. Focus on:
+                        1. Using scholarly vocabulary and formal language
+                        2. keep the original meaning intact and 96% of same length of words.
+                        3. Do not change the citation format.
+                        4. Avoiding colloquialisms and informal expressions
+                        5. Ensuring logical flow and academic structure
+                        """
+                        text: str = dspy.InputField(
+                            desc=f"Text to rewrite in academic {academic_lang}"
+                        )
+                        academic: str = dspy.OutputField(
+                            desc=f"Academic rewritten text in {academic_lang}"
+                        )
+                    academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
+                    response = academic_rewrite(text=section)
+                    academic_paragraphs.append(response.academic)
+        
+        academic_text = "\n\n".join(academic_paragraphs)
+    else:
+        # Original behavior for non-timestamp processing
+        paragraphs = segmented_text.split("\n\n")
+        academic_paragraphs = []
+        for para in paragraphs:
+            if para.strip():  # Skip empty paragraphs
+                class AcademicRewrite(dspy.Signature):
+                    """
+                    Rewrite this text in formal academic style in {academic_lang}. Focus on:
+                    1. Using scholarly vocabulary and formal language
+                    2. keep the original meaning intact and 96% of same length of words.
+                    3. Do not change the citation format.
+                    4. Avoiding colloquialisms and informal expressions
+                    5. Ensuring logical flow and academic structure
+                    """
+                    text: str = dspy.InputField(
+                        desc=f"Text to rewrite in academic {academic_lang}"
+                    )
+                    academic: str = dspy.OutputField(
+                        desc=f"Academic rewritten text in {academic_lang}"
+                    )
 
-            academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
-            response = academic_rewrite(text=para)
-            academic_paragraphs.append(response.academic)
-
-    academic_text = "\n\n".join(academic_paragraphs)
+                academic_rewrite = dspy.ChainOfThought(AcademicRewrite)
+                response = academic_rewrite(text=para)
+                academic_paragraphs.append(response.academic)
+        
+        academic_text = "\n\n".join(academic_paragraphs)
     
     if output_dir:
         base_name = os.path.splitext(os.path.basename(file_path))[0]

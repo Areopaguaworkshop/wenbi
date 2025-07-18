@@ -63,6 +63,7 @@ def process_input(
     timestamp=None,
     output_wav="",
     subcommand=None,  # New parameter to specify which subcommand to use
+    cite_timestamps=False,  # New parameter for timestamp citation
 ):
     """Process input with new logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
@@ -139,6 +140,7 @@ def process_input(
                             max_tokens=max_tokens,
                             timeout=timeout,
                             temperature=temperature,
+                            cite_timestamps=cite_timestamps,
                         )
                     elif subcommand == "rewrite":
                         result = rewrite(
@@ -150,6 +152,7 @@ def process_input(
                             max_tokens=max_tokens,
                             timeout=timeout,
                             temperature=temperature,
+                            cite_timestamps=cite_timestamps,
                         )
                     elif subcommand == "academic":
                         result = academic(
@@ -161,6 +164,7 @@ def process_input(
                             max_tokens=max_tokens,
                             timeout=timeout,
                             temperature=temperature,
+                            cite_timestamps=cite_timestamps,
                         )
                     else:
                         result = "Error: Unknown subcommand"
@@ -202,6 +206,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 elif subcommand == "rewrite":
                     result = rewrite(
@@ -213,6 +218,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 elif subcommand == "academic":
                     result = academic(
@@ -224,6 +230,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 else:
                     return "Error: Unknown subcommand", None, None, None
@@ -251,6 +258,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 elif subcommand == "rewrite":
                     result = rewrite(
@@ -262,6 +270,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 elif subcommand == "academic":
                     result = academic(
@@ -273,6 +282,7 @@ def process_input(
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
+                        cite_timestamps=cite_timestamps,
                     )
                 else:
                     return "Error: Unknown subcommand", None, None, None
