@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="wenbi_logo.PNG" alt="Wenbi Logo" width="200"/>
+</p>
+
 # 🎬 Wenbi: Intelligent Media-to-Text and Text-to-Text Processing
 
 **Transform your audio and video content into polished, academic-quality written documents with AI precision!**
