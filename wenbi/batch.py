@@ -94,7 +94,7 @@ def main():
     parser.add_argument("--translate-lang", default="Chinese", help="Target translation language")
     parser.add_argument("--rewrite-lang", default="Chinese", help="Target language for rewriting")
     parser.add_argument("--multi-language", action="store_true", help="Enable multi-language processing")
-    parser.add_argument("--chunk-length", type=int, default=8, help="Number of sentences per chunk")
+    parser.add_argument("--chunk-length", type=int, default=20, help="Number of sentences per chunk")
     parser.add_argument("--max-tokens", type=int, default=50000, help="Maximum tokens for LLM")
     parser.add_argument("--timeout", type=int, default=3600, help="LLM timeout in seconds")
     parser.add_argument("--temperature", type=float, default=0.1, help="LLM temperature")

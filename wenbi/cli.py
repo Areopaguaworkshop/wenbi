@@ -191,7 +191,7 @@ def handle_rewrite_command(args):
     params = {
         'output_dir': args.output_dir or config.get('output_dir', ''),
         'llm': args.llm or config.get('llm', ''),
-        'chunk_length': args.chunk_length or config.get('chunk_length', 8),
+        'chunk_length': args.chunk_length or config.get('chunk_length', 20),
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
@@ -239,7 +239,7 @@ def handle_translate_command(args):
     params = {
         'output_dir': args.output_dir or config.get('output_dir', ''),
         'llm': args.llm or config.get('llm', ''),
-        'chunk_length': args.chunk_length or config.get('chunk_length', 8),
+        'chunk_length': args.chunk_length or config.get('chunk_length', 20),
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
@@ -287,7 +287,7 @@ def handle_academic_command(args):
     params = {
         'output_dir': args.output_dir or config.get('output_dir', ''),
         'llm': args.llm or config.get('llm', ''),
-        'chunk_length': args.chunk_length or config.get('chunk_length', 8),
+        'chunk_length': args.chunk_length or config.get('chunk_length', 20),
         'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
         'timeout': args.timeout or config.get('timeout', 3600),
         'temperature': args.temperature or config.get('temperature', 0.1),
@@ -341,8 +341,8 @@ def main():
         subparser.add_argument("--output-dir", "-o", default="", help="Output directory (optional)")
         subparser.add_argument("--llm", default="", help="LLM model identifier (optional)")
         subparser.add_argument("--lang", "-l", default="", help="Target language")
-        subparser.add_argument("--chunk-length", "-cl", type=int, default=8,
-                             help="Number of sentences per paragraph (default: 8)")
+        subparser.add_argument("--chunk-length", "-cl", type=int, default=20,
+                             help="Number of sentences per paragraph (default: 20)")
         subparser.add_argument("--max-tokens", "-mt", type=int, default=130000,
                              help="Maximum tokens for LLM output (default: 130000)")
         subparser.add_argument("--timeout", "-to", type=int, default=3600,

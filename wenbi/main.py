@@ -48,7 +48,7 @@ def process_input(
     multi_language=False,
     lang="Chinese",  # Consolidated language parameter
     output_dir="",
-    chunk_length=8,
+    chunk_length=20,
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
