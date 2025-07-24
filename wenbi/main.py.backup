@@ -10,7 +10,6 @@ import os
 import gradio as gr
 import sys
 import dspy
-import logging
 
 # Only use package-relative output dir for web interface
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -58,20 +57,11 @@ def process_input(
     output_wav="",
     subcommand=None,  # New parameter to specify which subcommand to use
     cite_timestamps=False,  # New parameter for timestamp citation
-    verbose=False,  # New parameter for verbose logging
 ):
     """Process input with logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
     2. If input is VTT/markdown/docx: directly process with subcommand
     """
-    logger = logging.getLogger(__name__)
-    
-    if verbose:
-        logger.debug("=== Starting process_input ===")
-        logger.debug(f"Input file: {file_path}")
-        logger.debug(f"Input URL: {url}")
-        logger.debug(f"Subcommand: {subcommand}")
-        logger.debug(f"LLM: {llm}")
     # Use current directory for CLI, package directory for web interface
     out_dir = (
         output_dir
@@ -145,21 +135,17 @@ def process_input(
                             cite_timestamps=cite_timestamps,
                         )
                     elif subcommand == "rewrite":
-
-                        rewrite_text, rewrite_file = rewrite(
-vtt_file,
+                        result = rewrite(
+                            vtt_file,
                             output_dir=out_dir,
                             llm=llm,
-                            rewrite_language=lang,
+                            rewrite_lang=lang,
                             chunk_length=chunk_length,
                             max_tokens=max_tokens,
                             timeout=timeout,
                             temperature=temperature,
                             cite_timestamps=cite_timestamps,
-
                         )
-
-                        result = (rewrite_text, rewrite_file)
                     elif subcommand == "academic":
                         result = academic(
                             vtt_file,
@@ -185,17 +171,7 @@ vtt_file,
             else:
                 result = final_outputs["output"]
                 base_name = os.path.splitext(os.path.basename(vtt_file))[0]
-                # Handle tuple result format for rewrite
-
-                if isinstance(result, tuple) and len(result) == 2:
-
-                    text_content, file_path = result
-
-                    return text_content, file_path, None, base_name
-
-                else:
-
-                    return result, result, None, base_name
+                return result, result, None, base_name
         else:
             # Original behavior for backward compatibility
             return _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language)
@@ -218,21 +194,17 @@ vtt_file,
                         cite_timestamps=cite_timestamps,
                     )
                 elif subcommand == "rewrite":
-
-                    rewrite_text, rewrite_file = rewrite(
-file_path,
+                    result = rewrite(
+                        file_path,
                         output_dir=out_dir,
                         llm=llm,
-                        rewrite_language=lang,
+                        rewrite_lang=lang,
                         chunk_length=chunk_length,
                         max_tokens=max_tokens,
                         timeout=timeout,
                         temperature=temperature,
                         cite_timestamps=cite_timestamps,
-
                     )
-
-                    result = (rewrite_text, rewrite_file)
                 elif subcommand == "academic":
                     result = academic(
                         file_path,
@@ -249,17 +221,7 @@ file_path,
                     return "Error: Unknown subcommand", None, None, None
                 
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
-                # Handle tuple result format for rewrite
-
-                if isinstance(result, tuple) and len(result) == 2:
-
-                    text_content, file_path = result
-
-                    return text_content, file_path, None, base_name
-
-                else:
-
-                    return result, result, None, base_name
+                return result, result, None, base_name
             except Exception as e:
                 print(f"Error processing text file with {subcommand}: {e}")
                 return f"Error: Failed during {subcommand} processing", None, None, None
@@ -299,19 +261,16 @@ def _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max
         # Determine which LLM function to call based on detected language and target language
         if detected_lang == "zh" and lang.lower() == "chinese":
             # Use rewrite for Chinese to Chinese translation/rewriting
-            rewrite_text, rewrite_file = rewrite(
-vtt_file,
+            output = rewrite(
+                vtt_file,
                 output_dir=out_dir,
                 llm=llm,
-                rewrite_language=lang,
+                rewrite_lang=lang,
                 chunk_length=chunk_length,
                 max_tokens=max_tokens,
                 timeout=timeout,
                 temperature=temperature,
-
             )
-
-            output = (rewrite_text, rewrite_file)
         else:
             # Use translate for other languages or when target is not Chinese
             output = translate(
@@ -330,17 +289,7 @@ vtt_file,
         return final_outputs
     else:
         result = final_outputs["output"]
-        # Handle tuple result format for rewrite
-
-        if isinstance(result, tuple) and len(result) == 2:
-
-            text_content, file_path = result
-
-            return text_content, file_path, csv_file, base_name
-
-        else:
-
-            return result, result, csv_file, base_name
+        return result, result, csv_file, base_name
 
 
 def _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature):

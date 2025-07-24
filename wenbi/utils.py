@@ -9,46 +9,63 @@ from spacy.lang.en import English
 import spacy
 from langdetect import detect, detect_langs, LangDetectException
 from pydub import AudioSegment
+import logging
 
 
-def parse_subtitle(file_path, vtt_file=None):
+def parse_subtitle(file_path, vtt_file=None, verbose=False):
     """
     Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame.
     If vtt_file is provided, it will be used directly as the content.
     """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Parsing subtitle file: {file_path}")
+    
     if vtt_file is None:
         try:
             with open(file_path, "r", encoding="utf-8-sig", errors="replace") as file:
                 lines = file.readlines()
+            if verbose:
+                logger.debug(f"Read {len(lines)} lines from file")
         except FileNotFoundError:
+            if verbose:
+                logger.debug(f"File not found: {file_path}")
             return pd.DataFrame(columns=["Timestamps", "Content"])
         except ImportError:
             print("pysrt library not found. Falling back to less robust parsing.")
     else:
         lines = vtt_file.splitlines()
+        if verbose:
+            logger.debug(f"Processing {len(lines)} lines from VTT content")
 
     timestamps = []
     contents = []
     current_content = []
+    
     if file_path.lower().endswith(".txt") or (
         vtt_file is not None and file_path.lower().endswith(".txt")
     ):
         contents = lines
         timestamps = [""] * len(contents)
+        if verbose:
+            logger.debug(f"Processed as plain text file with {len(contents)} entries")
     else:
         i = 0
+        segment_count = 0
         while i < len(lines):
             line = lines[i].strip()
             # Check for timestamp line
             if "-->" in line or re.match(
-                r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}", line
+                r"\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}", line
             ):
                 timestamps.append(line)
+                segment_count += 1
                 i += 1
                 current_content = []
                 # Skip any empty lines and collect text until a new timestamp is detected.
                 while i < len(lines) and not re.match(
-                    r"\d{2}:\d{2}:\d{2}[,\.]\d{3} --> \d{2}:\d{2}:\d{2}[,\.]\d{3}",
+                    r"\d{2}:\d{2}:\d{2}[,.]\d{3} --> \d{2}:\d{2}:\d{2}[,.]\d{3}",
                     lines[i].strip(),
                 ):
                     stripped = lines[i].strip()
@@ -59,6 +76,7 @@ def parse_subtitle(file_path, vtt_file=None):
             # Handle other subtitle formats (Dialogue or similar)
             elif "Dialogue:" in line or re.match(r"{\d+}{\d+}.*", line):
                 timestamps.append(line)
+                segment_count += 1
                 i += 1
                 current_content = []
                 while i < len(lines) and not lines[i].strip().isdigit():
@@ -69,11 +87,18 @@ def parse_subtitle(file_path, vtt_file=None):
                 contents.append(" ".join(current_content))
             else:
                 i += 1
+        
+        if verbose:
+            logger.debug(f"Parsed {segment_count} subtitle segments")
 
-    return pd.DataFrame({"Timestamps": timestamps, "Content": contents})
+    result_df = pd.DataFrame({"Timestamps": timestamps, "Content": contents})
+    if verbose:
+        logger.debug(f"Created DataFrame with {len(result_df)} rows")
+    
+    return result_df
 
 
-def transcribe(file_path, language=None, output_dir=None, model_size="large-v3"):
+def transcribe(file_path, language=None, output_dir=None, model_size="large-v3", verbose=False):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
 
@@ -82,18 +107,36 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
         language (str, optional): Language code for transcription
         output_dir (str, optional): Directory to save the VTT file
         model_size (str, optional): Whisper model size (tiny, base, small, medium, large-v1, large-v2, large-v3)
+        verbose (bool): Enable verbose logging
     """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Starting transcription of: {file_path}")
+        logger.debug(f"Model size: {model_size}")
+        logger.debug(f"Language: {language or 'auto-detect'}")
+    
     model = whisper.load_model(f"{model_size}", device="cpu")
+    if verbose:
+        logger.debug(f"Whisper model loaded: {model_size}")
+    
     result = model.transcribe(
-        file_path, fp16=False, verbose=True, language=language if language else None
+        file_path, fp16=False, verbose=verbose, language=language if language else None
     )
     detected_language = result.get(
         "language", language if language else "unknown")
 
+    if verbose:
+        logger.debug(f"Transcription completed. Detected language: {detected_language}")
+        logger.debug(f"Number of segments: {len(result['segments'])}")
+
     # Create VTT content with proper timestamps
     vtt_content = ["WEBVTT\n"]
-    for segment in result["segments"]:
-        # ...existing timestamp formatting...
+    for i, segment in enumerate(result["segments"]):
+        if verbose and i % 50 == 0:  # Log progress every 50 segments
+            logger.debug(f"Processing segment {i+1}/{len(result['segments'])}")
+        
+        # Format timestamps
         hours = int(segment["start"] // 3600)
         minutes = int((segment["start"] % 3600) // 60)
         start_seconds = segment["start"] % 60
@@ -103,327 +146,458 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3")
 
         start_time = f"{hours:02d}:{minutes:02d}:{start_seconds:06.3f}"
         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
-        text = segment["text"].strip()
-        vtt_content.append(f"\n{start_time} --> {end_time}\n{text}")
 
-    # Use provided output_dir or default to the base file's directory
+        vtt_content.append(f"{start_time} --> {end_time}\n")
+        vtt_content.append(f"{segment['text'].strip()}\n\n")
+
+    # Determine output file path
     if output_dir is None:
-        output_dir = os.path.dirname(os.path.abspath(file_path))
-    else:
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = os.path.dirname(file_path)
     base_name = os.path.splitext(os.path.basename(file_path))[0]
-    out_file = os.path.join(output_dir, base_name + ".vtt")
-    with open(out_file, "w", encoding="utf-8") as f:
-        f.write(" ".join(vtt_content))
+    vtt_file_path = os.path.join(output_dir, f"{base_name}.vtt")
 
-    return out_file, detected_language
+    # Write VTT file
+    with open(vtt_file_path, "w", encoding="utf-8") as f:
+        f.writelines(vtt_content)
+
+    if verbose:
+        logger.debug(f"VTT file saved: {vtt_file_path}")
+
+    # Create CSV file
+    csv_data = []
+    for segment in result["segments"]:
+        start_time = f"{int(segment['start'] // 3600):02d}:{int((segment['start'] % 3600) // 60):02d}:{segment['start'] % 60:06.3f}"
+        end_time = f"{int(segment['end'] // 3600):02d}:{int((segment['end'] % 3600) // 60):02d}:{segment['end'] % 60:06.3f}"
+        csv_data.append({
+            "Timestamps": f"{start_time} --> {end_time}",
+            "Content": segment["text"].strip()
+        })
+
+    csv_df = pd.DataFrame(csv_data)
+    csv_file_path = os.path.join(output_dir, f"{base_name}.csv")
+    csv_df.to_csv(csv_file_path, index=False, encoding="utf-8")
+
+    if verbose:
+        logger.debug(f"CSV file saved: {csv_file_path}")
+        logger.debug(f"Transcription process completed successfully")
+
+    return vtt_file_path, csv_file_path
 
 
-def segment(file_path, sentence_count=20, cite_timestamps=False):
-    """Segments a text file into paragraphs by grouping every N sentences.
+def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
+    """
+    Segments text into paragraphs with a fixed number of sentences.
     
     Args:
         file_path (str): Path to the input file
         sentence_count (int): Number of sentences per paragraph
-        cite_timestamps (bool): Whether to include timestamps as headers in output
+        cite_timestamps (bool): Whether to include timestamp headers
+        verbose (bool): Enable verbose logging
     """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Starting text segmentation: {file_path}")
+        logger.debug(f"Sentences per paragraph: {sentence_count}")
+        logger.debug(f"Include timestamps: {cite_timestamps}")
+    
     try:
-        # Check if cite_timestamps is requested for non-timestamp files
-        if cite_timestamps and not file_path.lower().endswith(('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi')):
-            raise ValueError("Error: --cite-timestamps can only be used with files that have timestamps (VTT, SRT, ASS, SSA, SUB, SMI)")
+        vtt_df = parse_subtitle(file_path, verbose=verbose)
         
-        # Handle docx files
-        if file_path.lower().endswith('.docx'):
-            from docx import Document
-            doc = Document(file_path)
-            text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
-        # Handle markdown files
-        elif file_path.lower().endswith(('.md', '.markdown', '.txt')):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                text = f.read()
-        else:
-            # Handle subtitle files
-            vtt_df = parse_subtitle(file_path)
-            if cite_timestamps:
-                # Check for missing or corrupted timestamps
-                if 'Timestamps' not in vtt_df.columns or vtt_df['Timestamps'].isnull().any() or vtt_df['Timestamps'].eq('').any():
-                    raise ValueError("Error: Timestamps missing or corrupted for cite_timestamps option.")
-                
-                return _segment_with_timestamps(vtt_df, sentence_count)
-            else:
-                text = "。".join(vtt_df["Content"])
+        if verbose:
+            logger.debug(f"Parsed {len(vtt_df)} subtitle segments")
+        
+        if cite_timestamps and not vtt_df.empty and vtt_df['Timestamps'].notna().any():
+            if verbose:
+                logger.debug("Using timestamp-aware segmentation")
+            return _segment_with_timestamps(vtt_df, sentence_count, verbose=verbose)
+        
+        # Regular segmentation without timestamps
+        all_content = "。".join(vtt_df["Content"]) if not vtt_df.empty else ""
+        
+        if verbose:
+            logger.debug(f"Total content length: {len(all_content)} characters")
+        
+        # Remove repeated patterns
+        pattern = r"(([\\u4e00-\\u9fa5。！？；：""（）【】《》、]{1,5}))(\\s?\\1)+"
+        cleaned_content = re.sub(pattern, r"\\1", all_content)
+        
+        if verbose and len(cleaned_content) != len(all_content):
+            logger.debug(f"Removed repetitions, new length: {len(cleaned_content)} characters")
 
-        # Directly use basic language classes
-        if any(char in text for char in "，。？！"):
+        # Detect language and initialize appropriate model
+        if any(char in cleaned_content for char in "，。？！"):
             nlp = Chinese()
+            if verbose:
+                logger.debug("Detected Chinese text, using Chinese NLP model")
         else:
             nlp = English()
+            if verbose:
+                logger.debug("Detected non-Chinese text, using English NLP model")
 
-        # Add the sentencizer component to the pipeline
+        # Add sentencizer if not present
         if "sentencizer" not in nlp.pipe_names:
             nlp.add_pipe("sentencizer")
 
-        doc = nlp(text)
-
+        doc = nlp(cleaned_content)
+        
+        # Process sentences into paragraphs
         paragraphs = []
-        current_paragraph = []
-        current_count = 0
-        for sent in doc.sents:
-            # Add Chinese comma if needed
+        current_sentences = []
+        count = 0
+        total_sentences = len(list(doc.sents))
+        
+        if verbose:
+            logger.debug(f"Processing {total_sentences} sentences")
+        
+        for i, sent in enumerate(doc.sents):
+            if verbose and i % 100 == 0:  # Log progress every 100 sentences
+                logger.debug(f"Processing sentence {i+1}/{total_sentences}")
+            
             sent_text = sent.text.strip()
+            if not sent_text:
+                continue
+                
+            # Add Chinese comma if needed
             if not any(sent_text.endswith(p) for p in "，。？！,.!?"):
                 sent_text += "，"
-            current_paragraph.append(sent_text)
-            current_count += 1
-            if current_count >= sentence_count:
-                paragraphs.append("".join(current_paragraph))
-                current_paragraph = []
-                current_count = 0
-
-        if current_paragraph:
-            paragraphs.append("".join(current_paragraph))
-
-        return "\n\n".join(paragraphs)
+                
+            current_sentences.append(sent_text)
+            count += 1
+            
+            # Create new paragraph when reaching sentence count
+            if count >= sentence_count:
+                paragraphs.append("".join(current_sentences))
+                current_sentences = []
+                count = 0
+        
+        # Add remaining sentences if any
+        if current_sentences:
+            paragraphs.append("".join(current_sentences))
+        
+        result = "\\n\\n".join(paragraphs)
+        
+        if verbose:
+            logger.debug(f"Created {len(paragraphs)} paragraphs")
+            logger.debug(f"Final text length: {len(result)} characters")
+        
+        return result
         
     except Exception as e:
-        print(f"Error in segment: {e}")
-        # Return the original text if processing fails
-        if file_path.lower().endswith(('.docx', '.md', '.markdown', '.txt')):
-            try:
-                if file_path.lower().endswith('.docx'):
-                    from docx import Document
-                    doc = Document(file_path)
-                    return "\n".join(para.text for para in doc.paragraphs if para.text.strip())
-                else:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        return f.read()
-            except:
-                return "Error reading file"
-        else:
-            try:
-                vtt_df = parse_subtitle(file_path)
-                return "。".join(vtt_df["Content"])
-            except:
-                return "Error reading subtitle file"
+        error_msg = f"An error occurred during segmentation: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        return error_msg
 
 
-def _segment_with_timestamps(vtt_df, sentence_count):
-    """Helper function to segment subtitle content with timestamps."""
-    # Convert timestamp format to HH:MM:SS
+def _segment_with_timestamps(vtt_df, sentence_count, verbose=False):
+    """Helper function for timestamp-aware segmentation"""
+    logger = logging.getLogger(__name__)
+    
     def format_timestamp(timestamp_str):
-        # Extract start time from timestamp (format: "HH:MM:SS.mmm --> HH:MM:SS.mmm")
+        """Format timestamp string to remove milliseconds for cleaner display"""
         if "-->" in timestamp_str:
-            parts = timestamp_str.split("-->")
-            start_time = parts[0].strip()
-            end_time = parts[1].strip()
-            # Convert to seconds format (remove milliseconds)
-            start_time = start_time.split('.')[0] if '.' in start_time else start_time.split(',')[0]
-            end_time = end_time.split('.')[0] if '.' in end_time else end_time.split(',')[0]
-            return start_time, end_time
-        return timestamp_str, timestamp_str
+            parts = timestamp_str.split(" --> ")
+            if len(parts) == 2:
+                start = parts[0].split(".")[0] if "." in parts[0] else parts[0].split(",")[0]
+                end = parts[1].split(".")[0] if "." in parts[1] else parts[1].split(",")[0]
+                return f"{start} - {end}"
+        return timestamp_str
     
-    # Handle cases where we have empty or corrupted data
-    if vtt_df.empty or 'Content' not in vtt_df.columns or 'Timestamps' not in vtt_df.columns:
-        return "Error: No valid content or timestamps found"
+    paragraphs = []
+    current_sentences = []
+    current_timestamps = []
+    count = 0
     
-    # Group content by sentences
-    all_content = []
-    all_timestamps = []
+    if verbose:
+        logger.debug(f"Processing {len(vtt_df)} segments with timestamps")
     
     for idx, row in vtt_df.iterrows():
-        content = row['Content'].strip() if pd.notna(row['Content']) else ''
-        timestamp = row['Timestamps'] if pd.notna(row['Timestamps']) else ''
+        content = str(row["Content"]).strip()
+        timestamp = str(row["Timestamps"]).strip()
         
-        if content and timestamp:
-            # Split content into sentences for proper grouping
-            sentences = re.split(r'[。！？.!?]', content)
-            sentences = [s.strip() for s in sentences if s.strip()]
-            
-            # If no sentences found, treat whole content as one sentence
-            if not sentences:
-                sentences = [content]
-            
-            for sentence in sentences:
-                if sentence:
-                    all_content.append(sentence)
-                    all_timestamps.append(timestamp)
-    
-    # If no content found, return error
-    if not all_content:
-        return "Error: No valid content found for processing"
-    
-    # Group into chunks based on sentence_count
-    output_chunks = []
-    current_chunk = []
-    chunk_start_time = None
-    chunk_end_time = None
-    
-    for i, (content, timestamp) in enumerate(zip(all_content, all_timestamps)):
-        if len(current_chunk) == 0:
-            # Start new chunk
-            chunk_start_time, _ = format_timestamp(timestamp)
+        if not content:
+            continue
         
-        current_chunk.append(content)
-        _, chunk_end_time = format_timestamp(timestamp)
+        # Add sentences from this segment
+        sentences = re.split(r'[。！？.!?]+', content)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
-        # Check if we should close this chunk
-        if len(current_chunk) >= sentence_count or i == len(all_content) - 1:
-            # Format chunk content
-            chunk_content = "。".join(current_chunk)
-            if not chunk_content.endswith(('。', '！', '？', '.', '!', '?')):
-                chunk_content += "。"
+        for sentence in sentences:
+            if not any(sentence.endswith(p) for p in "，。？！,.!?"):
+                sentence += "，"
             
-            # Create timestamp header
-            timestamp_header = f"### **{chunk_start_time} - {chunk_end_time}**"
+            current_sentences.append(sentence)
+            current_timestamps.append(timestamp)
+            count += 1
             
-            # Add to output
-            output_chunks.append(f"{timestamp_header}\n\n{chunk_content}")
-            
-            # Reset for next chunk
-            current_chunk = []
-            chunk_start_time = None
+            # Create new paragraph when reaching sentence count
+            if count >= sentence_count:
+                if current_timestamps:
+                    first_timestamp = format_timestamp(current_timestamps[0])
+                    last_timestamp = format_timestamp(current_timestamps[-1])
+                    
+                    # Create timestamp header
+                    if first_timestamp == last_timestamp:
+                        header = f"### **{first_timestamp}**\\n\\n"
+                    else:
+                        # Extract time ranges
+                        first_time = first_timestamp.split(" - ")[0] if " - " in first_timestamp else first_timestamp
+                        last_time = last_timestamp.split(" - ")[1] if " - " in last_timestamp else last_timestamp
+                        header = f"### **{first_time} - {last_time}**\\n\\n"
+                    
+                    paragraph_content = "".join(current_sentences)
+                    paragraphs.append(header + paragraph_content)
+                else:
+                    paragraphs.append("".join(current_sentences))
+                
+                current_sentences = []
+                current_timestamps = []
+                count = 0
     
-    return "\n\n".join(output_chunks)
+    # Add remaining sentences if any
+    if current_sentences:
+        if current_timestamps:
+            first_timestamp = format_timestamp(current_timestamps[0])
+            last_timestamp = format_timestamp(current_timestamps[-1])
+            
+            if first_timestamp == last_timestamp:
+                header = f"### **{first_timestamp}**\\n\\n"
+            else:
+                first_time = first_timestamp.split(" - ")[0] if " - " in first_timestamp else first_timestamp
+                last_time = last_timestamp.split(" - ")[1] if " - " in last_timestamp else last_timestamp
+                header = f"### **{first_time} - {last_time}**\\n\\n"
+            
+            paragraph_content = "".join(current_sentences)
+            paragraphs.append(header + paragraph_content)
+        else:
+            paragraphs.append("".join(current_sentences))
+    
+    result = "\\n\\n".join(paragraphs)
+    
+    if verbose:
+        logger.debug(f"Created {len(paragraphs)} timestamped paragraphs")
+    
+    return result
 
 
-def download_audio(url, output_dir=None, timestamp=None, output_wav=None):
+def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbose=False):
     """
-    Download audio from a URL and convert it to WAV format.
-
+    Downloads audio from a URL using yt-dlp and converts it to WAV format.
+    
     Args:
-        url (str): URL of the video/audio to download
-        output_dir (str, optional): Directory to save the downloaded file
-        timestamp (tuple, optional): (start_seconds, end_seconds) for extraction
-        output_wav (str, optional): Custom filename for the output WAV file
-
-    Returns:
-        str: Path to the downloaded WAV file
+        url (str): URL to download audio from
+        output_dir (str): Directory to save the downloaded audio
+        timestamp (dict): Optional start/end time for extraction
+        output_wav (str): Optional custom filename for WAV output
+        verbose (bool): Enable verbose logging
     """
-    import yt_dlp
-
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Starting audio download from URL: {url}")
+    
+    import subprocess
+    
     if output_dir is None:
         output_dir = os.getcwd()
-
-    # If output_wav is provided, use it as the output filename (without extension)
-    if output_wav:
-        output_wav = os.path.splitext(output_wav)[0]  # Remove extension if present
-        outtmpl = os.path.join(output_dir, f"{output_wav}.%(ext)s")
-    else:
-        outtmpl = os.path.join(output_dir, "%(title)s.%(ext)s")
-
-    ydl_opts = {
-        "format": "bestaudio/best",
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            }
-        ],
-        "outtmpl": outtmpl,
-        "quiet": False,
-        "no_warnings": True,
-    }
-
+    
+    if verbose:
+        logger.debug(f"Output directory: {output_dir}")
+    
+    # Create a temporary filename for the downloaded audio
+    temp_filename = "temp_download_audio"
+    temp_path = os.path.join(output_dir, temp_filename)
+    
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+        # Download audio using yt-dlp
+        cmd = [
+            "yt-dlp",
+            "--extract-audio",
+            "--audio-format", "wav",
+            "--output", f"{temp_path}.%(ext)s",
+            url
+        ]
+        
+        if verbose:
+            logger.debug(f"Running yt-dlp command: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        if verbose:
+            logger.debug("yt-dlp download completed successfully")
+        
+        # Find the downloaded file
+        downloaded_file = f"{temp_path}.wav"
+        if not os.path.exists(downloaded_file):
+            # Look for other possible extensions
+            for ext in ['.wav', '.mp3', '.m4a', '.webm']:
+                if os.path.exists(f"{temp_path}{ext}"):
+                    downloaded_file = f"{temp_path}{ext}"
+                    break
+        
+        if not os.path.exists(downloaded_file):
+            raise FileNotFoundError("Downloaded file not found")
+        
+        # Extract segment if timestamp is provided
+        if timestamp:
+            if verbose:
+                logger.debug(f"Extracting segment: {timestamp['start']} - {timestamp['end']}")
+            final_path = extract_audio_segment(downloaded_file, timestamp, output_dir, output_wav, verbose=verbose)
+            # Clean up temporary file
+            if os.path.exists(downloaded_file):
+                os.remove(downloaded_file)
+        else:
+            # Rename to final filename if output_wav is specified
             if output_wav:
-                output_file = os.path.join(output_dir, f"{output_wav}.wav")
+                final_path = os.path.join(output_dir, output_wav)
+                if not final_path.endswith('.wav'):
+                    final_path += '.wav'
+                os.rename(downloaded_file, final_path)
             else:
-                output_file = ydl.prepare_filename(info).rsplit(".", 1)[0] + ".wav"
-
-            if timestamp:
-                # Extract the specified segment
-                return extract_audio_segment(output_file, timestamp, output_dir)
-            return output_file
+                final_path = downloaded_file
+        
+        if verbose:
+            logger.debug(f"Audio download completed: {final_path}")
+        
+        return final_path
+        
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error downloading audio: {e.stderr}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
     except Exception as e:
-        raise Exception(f"Error downloading audio: {str(e)}")
+        error_msg = f"Error in download_audio: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
 
 
-def language_detect(file_path, detected_lang=None):
-    """
-    Detects the language of a text file using langdetect.
-    Returns language code (e.g., 'zh', 'en', etc.).
-    """
+def language_detect(file_path, detected_lang=None, verbose=False):
+    """Detect language of the content in a file"""
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Detecting language for: {file_path}")
+    
     try:
-        df = parse_subtitle(file_path)
-        sample_content = " ".join(df["Content"].head(20))
-        if not sample_content.strip():
-            # Fallback if file content is empty or only whitespace
-            return "en"
-        languages = detect_langs(sample_content)
-        if languages:
-            detected = languages[0].lang
-            return "zh" if detected.startswith("zh") else detected
-    except Exception as e:
-        print(f"Language detection error: {e}")
-    return "en"
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        if verbose:
+            logger.debug(f"File content length: {len(content)} characters")
+        
+        # Use provided language if available
+        if detected_lang:
+            if verbose:
+                logger.debug(f"Using provided language: {detected_lang}")
+            return detected_lang
+        
+        # Auto-detect language
+        detected = detect(content)
+        if verbose:
+            logger.debug(f"Auto-detected language: {detected}")
+        
+        return detected
+        
+    except (LangDetectException, Exception) as e:
+        if verbose:
+            logger.debug(f"Language detection failed: {e}, defaulting to 'en'")
+        return "en"
 
 
-def parse_timestamp(start_time=None, end_time=None):
-    """Parse start and end times in HH:MM:SS format to seconds tuple."""
+def parse_timestamp(start_time=None, end_time=None, verbose=False):
+    """Parse start and end time strings and return in seconds"""
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Parsing timestamps: {start_time} - {end_time}")
+    
     if not start_time or not end_time:
         return None
-    try:
-        def time_to_seconds(time_str):
-            h, m, s = map(int, time_str.split(':'))
-            return h * 3600 + m * 60 + s
+        
+    def time_to_seconds(time_str):
+        """Convert HH:MM:SS format to seconds"""
+        parts = time_str.split(':')
+        if len(parts) == 3:
+            hours, minutes, seconds = map(float, parts)
+            return hours * 3600 + minutes * 60 + seconds
+        return 0
+    
+    start_seconds = time_to_seconds(start_time)
+    end_seconds = time_to_seconds(end_time)
+    
+    if verbose:
+        logger.debug(f"Converted to seconds: {start_seconds} - {end_seconds}")
+    
+    return {'start': start_seconds, 'end': end_seconds}
 
-        return (time_to_seconds(start_time), time_to_seconds(end_time))
-    except:
-        raise ValueError("Invalid time format. Use HH:MM:SS")
 
-
-def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wav=""):
+def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wav="", verbose=False):
     """
-    Extract full audio or segment using moviepy.
-
+    Extract audio segment from video/audio file and convert to WAV format.
+    
     Args:
-        audio_path (str): Path to input audio/video file
-        timestamp (dict, optional): Dictionary with 'start' and 'end' times in HH:MM:SS format
-        output_dir (str, optional): Output directory for the extracted audio
-        output_wav (str, optional): Custom filename for the output WAV file
+        audio_path (str): Path to the input audio/video file
+        timestamp (dict): Optional dict with 'start' and 'end' times in seconds
+        output_dir (str): Directory to save the output
+        output_wav (str): Custom filename for the output WAV file
+        verbose (bool): Enable verbose logging
     """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Extracting audio from: {audio_path}")
+        if timestamp:
+            logger.debug(f"Segment: {timestamp['start']}s - {timestamp['end']}s")
+    
     if output_dir is None:
         output_dir = os.path.dirname(audio_path)
-
+    
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
-
-    try:
-        # Use VideoFileClip first to handle both video and audio files
-        try:
-            clip = VideoFileClip(audio_path)
-            audio = clip.audio
-        except:
-            # If not video, try loading as audio
-            audio = AudioFileClip(audio_path)
-
+    
+    # Determine output filename
+    if output_wav:
+        if not output_wav.endswith('.wav'):
+            output_wav += '.wav'
+        output_path = os.path.join(output_dir, output_wav)
+    else:
         if timestamp:
-            # Convert HH:MM:SS to seconds
-            start = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['start'].split(':')))
-            end = sum(x * int(t) for x, t in zip([3600, 60, 1], timestamp['end'].split(':')))
-
-            # Extract segment
-            audio = audio.subclipped(start, end)
-            if output_wav:
-                # Remove .wav extension if present in output_wav
-                output_wav = os.path.splitext(output_wav)[0]
-                output_path = os.path.join(output_dir, f"{output_wav}.wav")
-            else:
-                # Use default timestamp-based filename
-                output_path = os.path.join(output_dir, f"{base_name}_{timestamp['start']}-{timestamp['end']}.wav")
+            start_str = f"{int(timestamp['start']//3600):02d}{int((timestamp['start']%3600)//60):02d}{int(timestamp['start']%60):02d}"
+            end_str = f"{int(timestamp['end']//3600):02d}{int((timestamp['end']%3600)//60):02d}{int(timestamp['end']%60):02d}"
+            output_path = os.path.join(output_dir, f"{base_name}_{start_str}_{end_str}.wav")
         else:
             output_path = os.path.join(output_dir, f"{base_name}.wav")
-
-        # Write WAV file
-        audio.write_audiofile(output_path, codec='pcm_s16le')
-
-        # Clean up
-        audio.close()
-        if 'clip' in locals():
-            clip.close()
-
+    
+    if verbose:
+        logger.debug(f"Output path: {output_path}")
+    
+    try:
+        # Check if input is video or audio
+        if audio_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')):
+            if verbose:
+                logger.debug("Processing as video file")
+            with VideoFileClip(audio_path) as video:
+                audio_clip = video.audio
+                if timestamp:
+                    audio_clip = audio_clip.subclip(timestamp['start'], timestamp['end'])
+                audio_clip.write_audiofile(output_path, logger=None)
+        else:
+            if verbose:
+                logger.debug("Processing as audio file")
+            with AudioFileClip(audio_path) as audio:
+                if timestamp:
+                    audio = audio.subclip(timestamp['start'], timestamp['end'])
+                audio.write_audiofile(output_path, logger=None)
+        
+        if verbose:
+            logger.debug(f"Audio extraction completed: {output_path}")
+        
         return output_path
-
+        
     except Exception as e:
-        raise Exception(f"Error extracting audio: {e}")
+        error_msg = f"Error extracting audio: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
