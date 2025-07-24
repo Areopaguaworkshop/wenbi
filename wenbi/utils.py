@@ -275,7 +275,7 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         if current_sentences:
             paragraphs.append("".join(current_sentences))
         
-        result = "\\n\\n".join(paragraphs)
+        result = "\n\n".join(paragraphs)
         
         if verbose:
             logger.debug(f"Created {len(paragraphs)} paragraphs")
@@ -339,12 +339,12 @@ def _segment_with_timestamps(vtt_df, sentence_count, verbose=False):
                     
                     # Create timestamp header
                     if first_timestamp == last_timestamp:
-                        header = f"### **{first_timestamp}**\\n\\n"
+                        header = f"### **{first_timestamp}**\n\n"
                     else:
                         # Extract time ranges
                         first_time = first_timestamp.split(" - ")[0] if " - " in first_timestamp else first_timestamp
                         last_time = last_timestamp.split(" - ")[1] if " - " in last_timestamp else last_timestamp
-                        header = f"### **{first_time} - {last_time}**\\n\\n"
+                        header = f"### **{first_time} - {last_time}**\n\n"
                     
                     paragraph_content = "".join(current_sentences)
                     paragraphs.append(header + paragraph_content)
@@ -362,23 +362,33 @@ def _segment_with_timestamps(vtt_df, sentence_count, verbose=False):
             last_timestamp = format_timestamp(current_timestamps[-1])
             
             if first_timestamp == last_timestamp:
-                header = f"### **{first_timestamp}**\\n\\n"
+                header = f"### **{first_timestamp}**\n\n"
             else:
                 first_time = first_timestamp.split(" - ")[0] if " - " in first_timestamp else first_timestamp
                 last_time = last_timestamp.split(" - ")[1] if " - " in last_timestamp else last_timestamp
-                header = f"### **{first_time} - {last_time}**\\n\\n"
+                header = f"### **{first_time} - {last_time}**\n\n"
             
             paragraph_content = "".join(current_sentences)
             paragraphs.append(header + paragraph_content)
         else:
             paragraphs.append("".join(current_sentences))
     
-    result = "\\n\\n".join(paragraphs)
+    result = "\n\n".join(paragraphs)
     
     if verbose:
         logger.debug(f"Created {len(paragraphs)} timestamped paragraphs")
     
     return result
+
+
+def _sanitize_filename(filename):
+    """Sanitize a string to be a valid filename."""
+    # Remove invalid characters
+    sanitized = re.sub(r'[\\/*?:"<>|]', "", filename)
+    # Replace spaces with underscores
+    sanitized = sanitized.replace(" ", "_")
+    # Truncate to a reasonable length
+    return sanitized[:100]
 
 
 def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbose=False):
@@ -405,11 +415,22 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
     if verbose:
         logger.debug(f"Output directory: {output_dir}")
     
-    # Create a temporary filename for the downloaded audio
-    temp_filename = "temp_download_audio"
-    temp_path = os.path.join(output_dir, temp_filename)
-    
     try:
+        # Get video title using yt-dlp
+        get_title_cmd = ["yt-dlp", "--get-title", "--no-warnings", url]
+        if verbose:
+            logger.debug(f"Fetching title with command: {' '.join(get_title_cmd)}")
+        
+        title_result = subprocess.run(get_title_cmd, capture_output=True, text=True, check=True)
+        video_title = title_result.stdout.strip()
+        base_filename = _sanitize_filename(video_title)
+        
+        if verbose:
+            logger.debug(f"Sanitized filename: {base_filename}")
+
+        # Set the output path for the downloaded file
+        temp_path = os.path.join(output_dir, base_filename)
+
         # Download audio using yt-dlp
         cmd = [
             "yt-dlp",
@@ -601,3 +622,21 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
         if verbose:
             logger.debug(error_msg)
         raise Exception(error_msg)
+
+
+def save_markdown(content, output_path, verbose=False):
+    """Save content to a markdown file"""
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Saving markdown to: {output_path}")
+    
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        if verbose:
+            logger.debug("Markdown file saved successfully")
+    except Exception as e:
+        if verbose:
+            logger.debug(f"Error saving markdown: {e}")
+        raise Exception(f"Error saving markdown: {e}")
