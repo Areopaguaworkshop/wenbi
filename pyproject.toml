@@ -23,6 +23,7 @@ dependencies = [
   "python-docx>=1.1.2",
   "redlines>=0.5.2",
   "reportlab>=4.4.2",
+  #    "cite-extractor>=0.10.8",
   # "python_redlines @ git+https://github.com/JSv4/Python-Redlines@v0.0.1",
 ]
 readme = "README.md"

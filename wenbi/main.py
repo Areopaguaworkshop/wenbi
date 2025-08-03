@@ -7,7 +7,6 @@ from wenbi.utils import (
 )
 from wenbi.model import rewrite, translate, process_docx, academic
 import os
-import gradio as gr
 import sys
 import dspy
 import logging
@@ -369,69 +368,4 @@ def _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_lengt
     return "Error: Cannot process this file type without subcommand", None, None, None
 
 
-def create_interface():
-    # Updated textbox label for LLM model.
-    def process_wrapper(
-        file_path,
-        url,
-        transcribe_lang,  # renamed from 'language'
-        llm,  # Unified LLM parameter
-        multi_language,
-        lang,  # Consolidated language parameter
-    ):
-        multi_lang_bool = multi_language == "True"
-        return process_input(
-            file_path,
-            url,
-            transcribe_lang,  # pass as transcribe_lang
-            llm,  # pass the unified llm parameter
-            multi_lang_bool,
-            lang,  # pass the consolidated lang parameter
-        )
 
-    iface = gr.Interface(
-        fn=process_wrapper,
-        inputs=[
-            gr.File(label="Upload File", type="filepath"),
-            gr.Textbox(
-                label="Or Enter URL (YouTube, etc)",
-                value="",
-                placeholder="https://youtube.com/watch?v=...",
-            ),
-            gr.Textbox(
-                label="Transcribe Language (optional)",
-                value="",
-                placeholder="e.g., Chinese, English",
-            ),
-            gr.Textbox(
-                label="LLM Model (optional)",
-                value="ollama/qwen3",
-                placeholder="Enter LLM model identifier (e.g., ollama/qwen3, gemini/gemini-1.5-flash)",
-            ),
-            gr.Dropdown(
-                label="Multi-language Processing",
-                choices=["False", "True"],
-                value="False",
-                type="value",
-            ),
-            gr.Textbox(
-                label="Target Language",
-                value="Chinese",
-                placeholder="Enter target language",
-            ),
-        ],
-        outputs=[
-            gr.Textbox(label="Final Rewritten Output"),
-            gr.File(label="Download Markdown", type="filepath"),
-            gr.File(label="Download CSV", type="filepath"),
-            gr.Textbox(label="Filename (without extension)"),
-        ],
-        title="Wenbi, rewriting or translating all video, audio and subtitle files into a readable markdown files",
-        description="Upload a file or provide a URL to convert audio/video/subtitles to markdown and CSV.",
-    )
-    return iface
-
-
-if __name__ == "__main__":
-    iface = create_interface()
-    iface.launch()

@@ -2,12 +2,12 @@
 import argparse
 import os
 import sys
-import subprocess
 import yaml
 import logging
 from wenbi.main import process_input
 from wenbi.model import rewrite, translate, academic
 from wenbi.download import download_all
+from wenbi.gui import launch_gui
 
 
 def setup_logging(verbose=False):
@@ -596,9 +596,7 @@ def main():
     if args.gui:
         if args.verbose:
             logger.debug("Launching Gradio GUI")
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        main_py = os.path.join(current_dir, "main.py")
-        subprocess.run(["python", main_py])
+        launch_gui()
         return
 
     # Otherwise, run CLI mode (input must be provided)
