@@ -499,3 +499,410 @@ def process_docx(input_file, verbose=False):
         if verbose:
             logger.debug(error_msg)
         raise Exception(error_msg)
+
+
+def read_markdown_file(file_path, verbose=False):
+    """
+    Read markdown file content with verbose logging support.
+    
+    Returns: (markdown_content, file_path)
+    """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Reading markdown file: {file_path}")
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        if verbose:
+            logger.debug(f"Markdown file read successfully. Content length: {len(content)} characters")
+        
+        return content, file_path
+    
+    except Exception as e:
+        error_msg = f"Error reading markdown file: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
+
+
+def convert_slides_to_markdown(
+    slides_file,
+    output_dir="",
+    image_export_mode="embedded",
+    verbose=False,
+):
+    """
+    Convert PPTX/PDF to markdown using marker-pdf Python API with verbose logging support.
+    """
+    logger = logging.getLogger(__name__)
+
+    if verbose:
+        logger.debug("=== Starting Slides to Markdown Conversion ===")
+        logger.debug(f"Slides file: {slides_file}")
+        logger.debug(f"Image export mode: {image_export_mode}")
+
+    try:
+        from marker.converters.pdf import PdfConverter
+        from marker.models import load_cli_model_cache
+
+        if verbose:
+            logger.debug("Loading marker-pdf models...")
+        
+        # Load models for conversion
+        load_cli_model_cache()
+
+        if verbose:
+            logger.debug("Initializing PDF converter...")
+
+        # Convert slides to markdown
+        converter = PdfConverter(
+            artifact_mode="markdown",
+            max_pages=None,
+        )
+        
+        markdown_text = converter(slides_file)
+
+        if verbose:
+            logger.debug(
+                f"Conversion completed. Markdown length: {len(markdown_text)} characters"
+            )
+
+        # Handle image export mode
+        if image_export_mode == "none":
+            # Remove image references from markdown
+            import re
+            markdown_text = re.sub(r'!\[.*?\]\(.*?\)', '', markdown_text)
+            if verbose:
+                logger.debug("Stripped image references from markdown")
+
+        # Save to file if output_dir provided
+        output_file = None
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            base_name = os.path.splitext(os.path.basename(slides_file))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_slides.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(markdown_text)
+
+            if verbose:
+                logger.debug(f"Slides markdown saved to: {output_file}")
+
+        return markdown_text, output_file
+
+    except ImportError as e:
+        error_msg = f"marker-pdf library not installed. Please install it with: pip install marker-pdf"
+        if verbose:
+            logger.debug(error_msg)
+        raise ImportError(error_msg)
+    except Exception as e:
+        error_msg = f"Error converting slides to markdown: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
+
+
+def align_slides_with_speech(
+    slide_content,
+    speech_content,
+    llm="ollama/qwen3",
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    verbose=False,
+):
+    """
+    Find speech content that aligns with slide content using LLM with verbose logging support.
+    Uses both exact phrase matching and semantic similarity.
+    """
+    logger = logging.getLogger(__name__)
+
+    if verbose:
+        logger.debug("=== Starting Slide-Speech Alignment ===")
+        logger.debug(f"LLM model: {llm}")
+        logger.debug(f"Slide content length: {len(slide_content)} characters")
+        logger.debug(f"Speech content length: {len(speech_content)} characters")
+
+    # Configure LLM
+    lm = configure_lm(
+        llm,
+        verbose=verbose,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+    )
+
+    class AlignSlideWithSpeech(dspy.Signature):
+        """
+        Find the speech content that aligns with the given slide content.
+        Use both exact phrase matching and semantic similarity.
+        Return the matching speech section and confidence level.
+        """
+
+        slide_content = dspy.InputField(
+            desc="Content from a slide in the presentation"
+        )
+        speech_content = dspy.InputField(
+            desc="Full transcribed speech content"
+        )
+        aligned_speech_section = dspy.OutputField(
+            desc="The matching speech section that aligns with the slide. Return 'NO_MATCH' if no alignment found."
+        )
+        confidence = dspy.OutputField(
+            desc="Confidence level of alignment: high, medium, low, or none"
+        )
+
+    align_module = dspy.Predict(AlignSlideWithSpeech)
+
+    if verbose:
+        logger.debug("LLM alignment module initialized")
+
+    try:
+        result = align_module(slide_content=slide_content, speech_content=speech_content)
+
+        if verbose:
+            logger.debug(f"Alignment result - Confidence: {result.confidence}")
+            logger.debug(f"Aligned section length: {len(result.aligned_speech_section)} characters")
+
+        return {
+            "aligned_section": result.aligned_speech_section,
+            "confidence": result.confidence.lower(),
+        }
+
+    except Exception as e:
+        error_msg = f"Error during alignment: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        logger.debug("=== Slide-Speech Alignment Completed ===")
+        return {
+            "aligned_section": "NO_MATCH",
+            "confidence": "none",
+        }
+
+
+def combine_speech_and_slides(
+    speech_markdown,
+    slides_markdown,
+    llm="ollama/qwen3",
+    output_dir="",
+    cite_timestamps=False,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    verbose=False,
+):
+    """
+    Combine speech and slides markdown by finding and inserting slide content
+    before matching speech sections. Uses LLM for alignment matching.
+    """
+    logger = logging.getLogger(__name__)
+
+    if verbose:
+        logger.debug("=== Starting Speech and Slides Combination ===")
+        logger.debug(f"Speech content length: {len(speech_markdown)} characters")
+        logger.debug(f"Slides content length: {len(slides_markdown)} characters")
+        logger.debug(f"Cite timestamps: {cite_timestamps}")
+
+    # Split slides into individual slides (separated by heading markers)
+    slides = _extract_slides(slides_markdown, verbose)
+
+    if verbose:
+        logger.debug(f"Extracted {len(slides)} slides from presentation")
+
+    # Split speech into paragraphs
+    speech_paragraphs = [p.strip() for p in speech_markdown.split("\n\n") if p.strip()]
+
+    if verbose:
+        logger.debug(f"Speech split into {len(speech_paragraphs)} paragraphs")
+
+    # Track which speech paragraphs have been used
+    used_indices = set()
+    aligned_results = []
+
+    # Process each slide in order
+    for slide_idx, slide_content in enumerate(slides, 1):
+        if verbose:
+            logger.debug(f"Processing slide {slide_idx}/{len(slides)}")
+
+        # Try to find alignment in speech
+        alignment = align_slides_with_speech(
+            slide_content,
+            speech_markdown,
+            llm=llm,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            verbose=verbose,
+        )
+
+        if alignment["confidence"] in ["high", "medium"]:
+            # Find the matching paragraph index
+            matched_idx = _find_matching_paragraph(
+                alignment["aligned_section"], speech_paragraphs, verbose
+            )
+
+            if matched_idx is not None:
+                aligned_results.append(
+                    {
+                        "slide_num": slide_idx,
+                        "slide_content": slide_content,
+                        "speech_idx": matched_idx,
+                        "confidence": alignment["confidence"],
+                    }
+                )
+                used_indices.add(matched_idx)
+                if verbose:
+                    logger.debug(
+                        f"Slide {slide_idx} aligned with speech paragraph {matched_idx} (confidence: {alignment['confidence']})"
+                    )
+            else:
+                if verbose:
+                    logger.debug(f"Slide {slide_idx} - Could not find matching paragraph")
+                aligned_results.append(
+                    {
+                        "slide_num": slide_idx,
+                        "slide_content": slide_content,
+                        "speech_idx": None,
+                        "confidence": "none",
+                    }
+                )
+        else:
+            if verbose:
+                logger.debug(f"Slide {slide_idx} - No alignment found (confidence: {alignment['confidence']})")
+            aligned_results.append(
+                {
+                    "slide_num": slide_idx,
+                    "slide_content": slide_content,
+                    "speech_idx": None,
+                    "confidence": "none",
+                }
+            )
+
+    # Build combined markdown by inserting slides before their matching speech sections
+    combined_content = _build_combined_markdown(
+        speech_paragraphs, aligned_results, cite_timestamps, verbose
+    )
+
+    if verbose:
+        logger.debug(f"Combined markdown length: {len(combined_content)} characters")
+        logger.debug("=== Speech and Slides Combination Completed ===")
+
+    return combined_content
+
+
+def _extract_slides(slides_markdown, verbose=False):
+    """Extract individual slides from markdown (by splitting on major headings)"""
+    logger = logging.getLogger(__name__)
+
+    # Split by ## or # headings (common slide markers)
+    import re
+
+    slides = []
+    current_slide = []
+
+    lines = slides_markdown.split("\n")
+    for line in lines:
+        # Check if this is a slide heading (## or #)
+        if re.match(r"^#+\s", line) and current_slide:
+            # Save current slide and start new one
+            slides.append("\n".join(current_slide).strip())
+            current_slide = [line]
+        else:
+            current_slide.append(line)
+
+    # Don't forget last slide
+    if current_slide:
+        slides.append("\n".join(current_slide).strip())
+
+    if verbose:
+        logger.debug(f"Extracted {len(slides)} slides from markdown")
+
+    return [s for s in slides if s.strip()]  # Filter empty slides
+
+
+def _find_matching_paragraph(matched_section, speech_paragraphs, verbose=False):
+    """Find which paragraph index contains the matched section"""
+    logger = logging.getLogger(__name__)
+
+    if matched_section == "NO_MATCH":
+        return None
+
+    # Try exact match first
+    for idx, para in enumerate(speech_paragraphs):
+        if matched_section.lower() in para.lower():
+            if verbose:
+                logger.debug(f"Found exact match at paragraph {idx}")
+            return idx
+
+    # Fuzzy match: find most similar paragraph
+    best_match_idx = None
+    best_similarity = 0
+
+    for idx, para in enumerate(speech_paragraphs):
+        # Count overlapping words
+        matched_words = set(matched_section.lower().split())
+        para_words = set(para.lower().split())
+        overlap = len(matched_words & para_words)
+
+        if overlap > best_similarity:
+            best_similarity = overlap
+            best_match_idx = idx
+
+    if best_match_idx is not None and best_similarity > 2:
+        if verbose:
+            logger.debug(
+                f"Found fuzzy match at paragraph {best_match_idx} with {best_similarity} overlapping words"
+            )
+        return best_match_idx
+
+    if verbose:
+        logger.debug("No matching paragraph found")
+    return None
+
+
+def _build_combined_markdown(speech_paragraphs, aligned_results, cite_timestamps=False, verbose=False):
+    """Build combined markdown by inserting slides before matching speech sections"""
+    logger = logging.getLogger(__name__)
+
+    # Create a mapping of speech index -> list of slides to insert before it
+    slides_before_speech = {}
+    unaligned_slides = []
+
+    for result in aligned_results:
+        if result["speech_idx"] is not None:
+            if result["speech_idx"] not in slides_before_speech:
+                slides_before_speech[result["speech_idx"]] = []
+            slides_before_speech[result["speech_idx"]].append(result["slide_content"])
+        else:
+            unaligned_slides.append(result)
+
+    # Build combined content
+    combined = []
+
+    for idx, para in enumerate(speech_paragraphs):
+        # Insert slides before this paragraph if they align with it
+        if idx in slides_before_speech:
+            for slide_content in slides_before_speech[idx]:
+                combined.append(slide_content)
+                combined.append("")  # Blank line separator
+
+        combined.append(para)
+        combined.append("")  # Blank line separator
+
+    # Add unaligned slides at the end (in order)
+    if unaligned_slides:
+        if verbose:
+            logger.debug(f"Adding {len(unaligned_slides)} unaligned slides at the end")
+        combined.append("---\n\n## Unaligned Slides\n")
+        for result in unaligned_slides:
+            combined.append(result["slide_content"])
+            combined.append("")
+
+    result = "\n".join(combined).strip()
+
+    if verbose:
+        logger.debug(f"Combined content built with {len(speech_paragraphs)} speech paragraphs")
+
+    return result

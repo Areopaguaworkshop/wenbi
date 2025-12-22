@@ -5,7 +5,7 @@ import sys
 import yaml
 import logging
 from wenbi.main import process_input
-from wenbi.model import rewrite, translate, academic
+from wenbi.model import rewrite, translate, academic, convert_slides_to_markdown, combine_speech_and_slides, read_markdown_file
 from wenbi.download import download_all
 from wenbi.gui import launch_gui
 
@@ -459,11 +459,209 @@ def add_global_args(subparser):
                          help="Enable verbose output showing processing details")
 
 
+def is_markdown_file(file_path):
+    """Check if file is markdown format"""
+    if not file_path:
+        return False
+    ext = os.path.splitext(file_path)[1].lower()
+    return ext in ['.md', '.markdown']
+
+
+def handle_ppt_command(args):
+    """Handle the ppt subcommand - combine speech and presentation slides"""
+    logger = setup_logging(args.verbose)
+    
+    if args.verbose:
+        logger.debug("Starting ppt command")
+        logger.debug(f"Speech input: {args.input}")
+        logger.debug(f"Slides file: {args.slides_file}")
+    
+    # Validate inputs
+    if not args.slides_file:
+        print("Error: Slides file is required for ppt subcommand")
+        sys.exit(1)
+    
+    if not os.path.isfile(args.slides_file):
+        print(f"Error: Slides file not found: {args.slides_file}")
+        sys.exit(1)
+    
+    # Check if slides_file is markdown (no format validation needed for markdown)
+    slides_is_markdown = is_markdown_file(args.slides_file)
+    
+    # Validate slides file format if not markdown
+    if not slides_is_markdown:
+        slides_ext = os.path.splitext(args.slides_file)[1].lower()
+        if slides_ext not in ['.pdf', '.pptx']:
+            print(f"Error: Slides file must be PDF, PPTX, or markdown file, got {slides_ext}")
+            sys.exit(1)
+    
+    # Validate transcription arguments
+    validate_transcription_args(args)
+    
+    # Load config if provided
+    config = load_config(args.config)
+    
+    # Prepare parameters for speech processing (rewrite)
+    params = {
+        'output_dir': args.output_dir or config.get('output_dir', ''),
+        'llm': args.llm or config.get('llm', ''),
+        'chunk_length': args.chunk_length or config.get('chunk_length', 20),
+        'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
+        'timeout': args.timeout or config.get('timeout', 3600),
+        'temperature': args.temperature or config.get('temperature', 0.1),
+        'lang': args.lang or config.get('lang', 'Chinese'),
+        'subcommand': 'rewrite',  # Always use rewrite for speech processing
+        'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3'),
+        'multi_language': args.multi_language or config.get('multi_language', False),
+        'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+        'output_wav': args.output_wav or config.get('output_wav', ''),
+        'cite_timestamps': args.cite_timestamps or config.get('cite_timestamps', False),
+        'verbose': args.verbose,
+    }
+    
+    if args.verbose:
+        logger.debug("Configuration:")
+        for key, value in params.items():
+            if key != 'verbose':
+                logger.debug(f"  {key}: {value}")
+    
+    # Handle timestamp parameters
+    if args.start_time and args.end_time:
+        params['timestamp'] = parse_timestamp(args.start_time, args.end_time)
+        if args.verbose:
+            logger.debug(f"Processing timestamp segment: {args.start_time} - {args.end_time}")
+    else:
+        params['timestamp'] = None
+    
+    try:
+        # Determine if speech_input is markdown
+        speech_is_markdown = is_markdown_file(args.input)
+        
+        # Step 1: Process speech input
+        if speech_is_markdown:
+            if args.verbose:
+                logger.debug("Step 1: Reading speech markdown file (skipping rewrite subcommand)")
+            
+            try:
+                speech_markdown, _ = read_markdown_file(args.input, verbose=args.verbose)
+                base_name = os.path.splitext(os.path.basename(args.input))[0]
+                speech_file = None  # Mark as input, not generated
+            except Exception as e:
+                print(f"Error reading speech markdown: {e}")
+                sys.exit(1)
+        else:
+            if args.verbose:
+                logger.debug("Step 1: Processing speech input with rewrite subcommand")
+            
+            is_url = args.input.startswith(("http://", "https://", "www."))
+            speech_result = process_input(
+                None if is_url else args.input,
+                args.input if is_url else "",
+                **params
+            )
+            
+            if speech_result[0] and speech_result[0].startswith("Error"):
+                print(f"Error processing speech: {speech_result[0]}")
+                sys.exit(1)
+            
+            speech_markdown = speech_result[0]
+            speech_file = speech_result[1]  # Mark as generated
+            base_name = speech_result[3] or "output"
+        
+        if args.verbose:
+            logger.debug(f"Speech processing completed.")
+            if speech_file:
+                logger.debug(f"Output file: {speech_file}")
+        
+        # Step 2: Convert/read slides
+        if args.verbose:
+            logger.debug(f"Step 2: Processing slides {'(reading markdown)' if slides_is_markdown else '(converting to markdown)'}")
+        
+        output_dir = params['output_dir'] or os.getcwd()
+        
+        if slides_is_markdown:
+            try:
+                slides_markdown, _ = read_markdown_file(args.slides_file, verbose=args.verbose)
+                slides_file = None  # Mark as input, not generated
+            except Exception as e:
+                print(f"Error reading slides markdown: {e}")
+                sys.exit(1)
+        else:
+            slides_markdown, slides_file = convert_slides_to_markdown(
+                args.slides_file,
+                output_dir=output_dir,
+                image_export_mode=args.image_export_mode or config.get('image_export_mode', 'embedded'),
+                verbose=args.verbose,
+            )  # Mark as generated
+        
+        if args.verbose:
+            logger.debug(f"Slides processing completed.")
+        
+        # Step 3: Combine speech and slides
+        if args.verbose:
+            logger.debug("Step 3: Combining speech and slides with alignment")
+        
+        combined_markdown = combine_speech_and_slides(
+            speech_markdown,
+            slides_markdown,
+            llm=params['llm'],
+            output_dir=output_dir,
+            cite_timestamps=params['cite_timestamps'],
+            max_tokens=params['max_tokens'],
+            timeout=params['timeout'],
+            temperature=params['temperature'],
+            verbose=args.verbose,
+        )
+        
+        # Step 4: Save outputs
+        if args.verbose:
+            logger.debug("Step 4: Saving output files")
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save generated speech file (only if it was generated, not if it was input)
+        if speech_file and args.verbose:
+            logger.debug(f"Speech file already saved to: {speech_file}")
+        
+        # Save generated slides file (only if it was generated, not if it was input)
+        if slides_file and args.verbose:
+            logger.debug(f"Slides file already saved to: {slides_file}")
+        
+        # Always save combined output
+        combined_file = os.path.join(output_dir, f"{base_name}_combined.md")
+        with open(combined_file, "w", encoding="utf-8") as f:
+            f.write(combined_markdown)
+        
+        if args.verbose:
+            logger.debug(f"Combined output saved to: {combined_file}")
+        
+        print("PPT processing completed successfully!")
+        
+        # Show which files were generated vs used as input
+        if speech_file:
+            print(f"Speech file (generated): {speech_file}")
+        else:
+            print(f"Speech file (input): {args.input}")
+        
+        if slides_file:
+            print(f"Slides file (generated): {slides_file}")
+        else:
+            print(f"Slides file (input): {args.slides_file}")
+        
+        print(f"Combined file: {combined_file}")
+        
+    except Exception as e:
+        print(f"Error during PPT processing: {e}")
+        if args.verbose:
+            logger.exception("Detailed error trace:")
+        sys.exit(1)
+
+
 def main():
     download_all()
 
     # Check if this is a subcommand
-    subcommands = ['rewrite', 'rw', 'translate', 'tr', 'academic', 'ac']
+    subcommands = ['rewrite', 'rw', 'translate', 'tr', 'academic', 'ac', 'ppt', 'p']
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
 
     if is_subcommand:
@@ -489,6 +687,15 @@ def main():
         academic_parser = subparsers.add_parser('academic', aliases=['ac'], help='Academic rewriting')
         add_global_args(academic_parser)
         academic_parser.set_defaults(func=handle_academic_command)
+
+        # PPT subcommand - combine speech and slides
+        ppt_parser = subparsers.add_parser('ppt', aliases=['p'], help='Combine speech with presentation slides')
+        add_global_args(ppt_parser)
+        ppt_parser.add_argument("slides_file", help="Path to slides file (PDF or PPTX)")
+        ppt_parser.add_argument("--image-export-mode", "-iem", default="embedded",
+                              choices=["none", "embedded", "referenced"],
+                              help="Image export mode for slides (default: embedded)")
+        ppt_parser.set_defaults(func=handle_ppt_command)
 
         args = parser.parse_args()
         args.func(args)

@@ -183,20 +183,56 @@ wenbi document.docx --llm ollama/qwen3 --lang English
 
 #### Subcommands
 
-Wenbi also provides specific subcommands for `rewrite`, `translate`, and `academic` tasks.
+Wenbi provides specific subcommands for different processing tasks:
 
 ```bash
-# Rewrite text
+# Rewrite text (oral → written)
 wenbi rewrite <input_file> --llm ollama/qwen3 --lang Chinese
 
-# Translate text
+# Translate text to target language
 wenbi translate <input_file> --llm gemini/gemini-1.5-flash --lang French
 
-# Academic rewriting
+# Academic rewriting for scholarly style
 wenbi academic <input_file> --llm openai/gpt-4o --lang English
+
+# NEW: Combine speech with presentation slides
+wenbi ppt <speech_input> <slides_file> --llm ollama/qwen3 --lang English
+# (abbreviated: wenbi p <speech_input> <slides_file>)
+```
+
+**PPT Subcommand**: The new `ppt` subcommand intelligently combines speech with presentation slides:
+- Accepts **any speech format**: video, audio, URL, or markdown file
+- Accepts **any slides format**: PDF, PPTX, or markdown file
+- **Skips redundant processing**: Uses markdown files directly if provided (no re-transcription/conversion)
+- Transcribes and rewrites media files using full rewrite subcommand
+- Converts PDF/PPTX slides to markdown using marker-pdf
+- Uses LLM-based alignment to find where each slide appears in the speech
+- Inserts slides before matching speech sections for seamless integration
+- Perfect for lectures, conferences, and educational content
+
+Examples:
+```bash
+# Merge lecture recording with presentation slides
+wenbi ppt lecture.mp4 presentation.pdf \
+  --llm gemini/gemini-1.5-flash \
+  --lang English \
+  --cite-timestamps \
+  --output-dir ./lecture_notes
+
+# Use existing markdown files (no reprocessing)
+wenbi ppt speech.md slides.md \
+  --llm ollama/qwen3 \
+  --output-dir ./output
+
+# Mix media and markdown (transcribe video, use slides markdown)
+wenbi ppt lecture.mp4 slides.md \
+  --lang English \
+  --output-dir ./notes
 ```
 
 Subcommands share common options with the main command.
+
+For detailed PPT subcommand documentation, see [PPT_QUICK_REFERENCE.md](PPT_QUICK_REFERENCE.md), [PPT_SUBCOMMAND_USAGE_GUIDE.md](PPT_SUBCOMMAND_USAGE_GUIDE.md), and [PPT_MARKDOWN_INPUT_UPDATE.md](PPT_MARKDOWN_INPUT_UPDATE.md).
 
 ### Batch Processing
 
