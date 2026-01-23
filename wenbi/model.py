@@ -1,7 +1,23 @@
 import dspy
 import os
 import logging
+import litellm
 from wenbi.utils import segment
+
+# Register custom model info for qwen3 with higher token limits
+# This overrides LiteLLM's default max_tokens of 40960
+litellm.register_model({
+    "ollama/qwen3": {
+        "max_tokens": 131072,
+        "max_input_tokens": 131072,
+        "max_output_tokens": 131072,
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "litellm_provider": "ollama",
+        "mode": "chat",
+        "supports_function_calling": True,
+    }
+})
 
 
 def configure_lm(model_string, verbose=False, **kwargs):
@@ -546,24 +562,24 @@ def convert_slides_to_markdown(
 
     try:
         from marker.converters.pdf import PdfConverter
-        from marker.models import load_cli_model_cache
+        from marker.models import create_model_dict
 
         if verbose:
             logger.debug("Loading marker-pdf models...")
         
-        # Load models for conversion
-        load_cli_model_cache()
+        # Create model dict for conversion
+        artifact_dict = create_model_dict()
 
         if verbose:
             logger.debug("Initializing PDF converter...")
 
         # Convert slides to markdown
         converter = PdfConverter(
-            artifact_mode="markdown",
-            max_pages=None,
+            artifact_dict=artifact_dict,
         )
         
-        markdown_text = converter(slides_file)
+        markdown_output = converter(slides_file)
+        markdown_text = markdown_output.markdown
 
         if verbose:
             logger.debug(
@@ -711,11 +727,40 @@ def combine_speech_and_slides(
     if verbose:
         logger.debug(f"Extracted {len(slides)} slides from presentation")
 
-    # Split speech into paragraphs
-    speech_paragraphs = [p.strip() for p in speech_markdown.split("\n\n") if p.strip()]
+    # Split speech into paragraphs - robust content preservation
+    # Try multiple splitting strategies to ensure maximum content preservation
+    strategies = [
+        lambda x: [p.strip() for p in x.split("\n\n") if p.strip()],  # Double newlines
+        lambda x: [p.strip() for p in x.split("\n") if p.strip()],    # Single newlines
+        lambda x: [p.strip() for p in x.replace('\n\n', '\n').split('\n') if p.strip()],  # Normalize then split
+    ]
+    
+    best_paragraphs = []
+    best_content_ratio = 0
+    
+    for strategy in strategies:
+        test_paragraphs = strategy(speech_markdown)
+        content_ratio = sum(len(p) for p in test_paragraphs) / len(speech_markdown) if speech_markdown else 0
+        
+        if content_ratio > best_content_ratio and len(test_paragraphs) > 0:
+            best_content_ratio = content_ratio
+            best_paragraphs = test_paragraphs
+    
+    speech_paragraphs = best_paragraphs
+    
+    # Fallback: if all strategies fail, use the entire content as one paragraph
+    if not speech_paragraphs and speech_markdown.strip():
+        speech_paragraphs = [speech_markdown.strip()]
+        if verbose:
+            logger.debug("Used fallback: entire speech as single paragraph")
 
     if verbose:
         logger.debug(f"Speech split into {len(speech_paragraphs)} paragraphs")
+        logger.debug(f"Original speech content length: {len(speech_markdown)} characters")
+        logger.debug(f"Total speech paragraphs content length: {sum(len(p) for p in speech_paragraphs)} characters")
+        # Check for content preservation
+        preserved_ratio = sum(len(p) for p in speech_paragraphs) / len(speech_markdown) if speech_markdown else 0
+        logger.debug(f"Content preservation ratio: {preserved_ratio:.2%}")
 
     # Track which speech paragraphs have been used
     used_indices = set()
@@ -784,9 +829,31 @@ def combine_speech_and_slides(
     combined_content = _build_combined_markdown(
         speech_paragraphs, aligned_results, cite_timestamps, verbose
     )
+    
+    # Final content preservation check
+    if verbose:
+        original_speech_length = len(speech_markdown)
+        final_combined_length = len(combined_content)
+        preservation_ratio = final_combined_length / original_speech_length if original_speech_length else 0
+        logger.debug(f"Content preservation check: {preservation_ratio:.2%}")
+        
+        # If preservation is too low, warn and potentially add missing content
+        if preservation_ratio < 0.80:
+            logger.warning(f"Low content preservation detected: {preservation_ratio:.2%}")
+            # Check if any speech content is completely missing
+            speech_content_in_combined = " ".join(speech_paragraphs)
+            if len(speech_content_in_combined) < original_speech_length * 0.80:
+                logger.warning("Significant speech content may be missing from combined output!")
 
     if verbose:
         logger.debug(f"Combined markdown length: {len(combined_content)} characters")
+        # Calculate final preservation ratio
+        original_speech_length = len(speech_markdown)
+        final_combined_length = len(combined_content)
+        preservation_ratio = final_combined_length / original_speech_length if original_speech_length else 0
+        logger.debug(f"Final content preservation ratio: {preservation_ratio:.2%}")
+        if preservation_ratio < 0.90:
+            logger.warning(f"Content preservation ratio is low: {preservation_ratio:.2%} - some speech content may be missing!")
         logger.debug("=== Speech and Slides Combination Completed ===")
 
     return combined_content
@@ -904,5 +971,8 @@ def _build_combined_markdown(speech_paragraphs, aligned_results, cite_timestamps
 
     if verbose:
         logger.debug(f"Combined content built with {len(speech_paragraphs)} speech paragraphs")
+        logger.debug(f"Final combined content length: {len(result)} characters")
+        # Calculate final preservation ratio (need to pass original speech length)
+        # Note: This will be calculated in the calling function
 
     return result

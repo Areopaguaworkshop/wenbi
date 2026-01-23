@@ -1,4 +1,20 @@
 import dspy
+import litellm
+
+# Register custom model info for qwen3 with higher token limits
+# This overrides LiteLLM's default max_tokens of 40960
+litellm.register_model({
+    "ollama/qwen3": {
+        "max_tokens": 131072,
+        "max_input_tokens": 131072,
+        "max_output_tokens": 131072,
+        "input_cost_per_token": 0.0,
+        "output_cost_per_token": 0.0,
+        "litellm_provider": "ollama",
+        "mode": "chat",
+        "supports_function_calling": True,
+    }
+})
 
 def get_ollama_lm(model_name="ollama/qwen3", base_url=None, max_tokens=130000, timeout=3600, temperature=0.1, **kwargs):
     """
