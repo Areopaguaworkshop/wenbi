@@ -859,6 +859,110 @@ def combine_speech_and_slides(
     return combined_content
 
 
+def combine_speech_and_slides_enhanced(
+    speech_markdown,
+    slides_markdown,
+    llm="ollama/qwen3",
+    output_dir="",
+    cite_timestamps=False,
+    max_tokens=50000,
+    timeout=3600,
+    temperature=0.1,
+    verbose=False,
+):
+    """
+    Enhanced version of combine_speech_and_slides using multi-layered similarity analysis
+    instead of LLM-based alignment. Implements keyword extraction, semantic similarity,
+    temporal constraints, and content preservation guarantees.
+    """
+    logger = logging.getLogger(__name__)
+
+    if verbose:
+        logger.debug("=== Starting Enhanced Speech and Slides Combination ===")
+        logger.debug(f"Speech content length: {len(speech_markdown)} characters")
+        logger.debug(f"Slides content length: {len(slides_markdown)} characters")
+
+    # Import enhanced functions
+    from wenbi.enhanced_combination import (
+        calculate_combined_similarity,
+        create_similarity_matrix,
+        find_optimal_alignment,
+        distribute_unaligned_slides,
+        build_enhanced_combined_markdown,
+        _extract_slides as enhanced_extract_slides
+    )
+
+    # Step 1: Extract slides from markdown
+    slides = enhanced_extract_slides(slides_markdown, verbose)
+
+    if verbose:
+        logger.debug(f"Extracted {len(slides)} slides from presentation")
+
+    # Step 2: Split speech into paragraphs (reuse existing logic)
+    strategies = [
+        lambda x: [p.strip() for p in x.split("\n\n") if p.strip()],  # Double newlines
+        lambda x: [p.strip() for p in x.split("\n") if p.strip()],    # Single newlines
+        lambda x: [p.strip() for p in x.replace('\n\n', '\n').split('\n') if p.strip()],  # Normalize then split
+    ]
+    
+    best_paragraphs = []
+    best_content_ratio = 0
+    
+    for strategy in strategies:
+        test_paragraphs = strategy(speech_markdown)
+        content_ratio = sum(len(p) for p in test_paragraphs) / len(speech_markdown) if speech_markdown else 0
+        
+        if content_ratio > best_content_ratio and len(test_paragraphs) > 0:
+            best_content_ratio = content_ratio
+            best_paragraphs = test_paragraphs
+    
+    speech_paragraphs = best_paragraphs
+    
+    # Fallback: if all strategies fail, use entire content as one paragraph
+    if not speech_paragraphs and speech_markdown.strip():
+        speech_paragraphs = [speech_markdown.strip()]
+        if verbose:
+            logger.debug("Used fallback: entire speech as single paragraph")
+
+    if verbose:
+        logger.debug(f"Speech split into {len(speech_paragraphs)} paragraphs")
+        preserved_ratio = sum(len(p) for p in speech_paragraphs) / len(speech_markdown) if speech_markdown else 0
+        logger.debug(f"Content preservation ratio: {preserved_ratio:.2%}")
+
+    # Step 3: Create similarity matrix for all slide-speech pairs
+    similarity_matrix = create_similarity_matrix(slides, speech_paragraphs, verbose)
+
+    # Step 4: Find optimal alignment with hybrid temporal constraints
+    aligned_slides = find_optimal_alignment(similarity_matrix, len(slides), len(speech_paragraphs), verbose)
+
+    # Step 5: Handle unaligned slides with even distribution
+    aligned_slides = distribute_unaligned_slides(slides, speech_paragraphs, aligned_slides, verbose)
+
+    # Step 6: Build enhanced combined markdown with content preservation
+    combined_content = build_enhanced_combined_markdown(
+        speech_paragraphs, slides, aligned_slides, cite_timestamps, verbose
+    )
+
+    # Step 7: Final content preservation check
+    if verbose:
+        original_speech_length = len(speech_markdown)
+        final_combined_length = len(combined_content)
+        preservation_ratio = final_combined_length / original_speech_length if original_speech_length else 0
+        logger.debug(f"Final content preservation ratio: {preservation_ratio:.2%}")
+        
+        # Count aligned vs unaligned slides
+        aligned_count = len([slide for slide, speeches in aligned_slides.items() if speeches])
+        unaligned_count = len(slides) - aligned_count
+        logger.debug(f"Alignment summary: {aligned_count} aligned, {unaligned_count} distributed slides")
+        
+        if preservation_ratio < 0.90:
+            logger.warning(f"Content preservation ratio is low: {preservation_ratio:.2%} - some speech content may be missing!")
+        
+        logger.debug("=== Enhanced Speech and Slides Combination Completed ===")
+
+    return combined_content
+
+
 def _extract_slides(slides_markdown, verbose=False):
     """Extract individual slides from markdown (by splitting on major headings)"""
     logger = logging.getLogger(__name__)

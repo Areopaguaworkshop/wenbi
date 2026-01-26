@@ -5,7 +5,7 @@ import sys
 import yaml
 import logging
 from wenbi.main import process_input
-from wenbi.model import rewrite, translate, academic, convert_slides_to_markdown, combine_speech_and_slides, read_markdown_file
+from wenbi.model import rewrite, translate, academic, convert_slides_to_markdown, combine_speech_and_slides, combine_speech_and_slides_enhanced, read_markdown_file
 from wenbi.download import download_all
 from wenbi.gui import launch_gui
 
@@ -601,17 +601,35 @@ def handle_ppt_command(args):
         if args.verbose:
             logger.debug("Step 3: Combining speech and slides with alignment")
         
-        combined_markdown = combine_speech_and_slides(
-            speech_markdown,
-            slides_markdown,
-            llm=params['llm'],
-            output_dir=output_dir,
-            cite_timestamps=params['cite_timestamps'],
-            max_tokens=params['max_tokens'],
-            timeout=params['timeout'],
-            temperature=params['temperature'],
-            verbose=args.verbose,
-        )
+        # Choose alignment method based on flag
+        if args.enhanced_alignment:
+            if args.verbose:
+                logger.debug("Using enhanced similarity-based alignment")
+            combined_markdown = combine_speech_and_slides_enhanced(
+                speech_markdown,
+                slides_markdown,
+                llm=params['llm'],
+                output_dir=output_dir,
+                cite_timestamps=params['cite_timestamps'],
+                max_tokens=params['max_tokens'],
+                timeout=params['timeout'],
+                temperature=params['temperature'],
+                verbose=args.verbose,
+            )
+        else:
+            if args.verbose:
+                logger.debug("Using original LLM-based alignment")
+            combined_markdown = combine_speech_and_slides(
+                speech_markdown,
+                slides_markdown,
+                llm=params['llm'],
+                output_dir=output_dir,
+                cite_timestamps=params['cite_timestamps'],
+                max_tokens=params['max_tokens'],
+                timeout=params['timeout'],
+                temperature=params['temperature'],
+                verbose=args.verbose,
+            )
         
         # Step 4: Save outputs
         if args.verbose:
@@ -695,6 +713,8 @@ def main():
         ppt_parser.add_argument("--image-export-mode", "-iem", default="embedded",
                               choices=["none", "embedded", "referenced"],
                               help="Image export mode for slides (default: embedded)")
+        ppt_parser.add_argument("--enhanced-alignment", "-ea", action="store_true", default=False,
+                              help="Use enhanced similarity-based alignment instead of LLM alignment")
         ppt_parser.set_defaults(func=handle_ppt_command)
 
         args = parser.parse_args()
