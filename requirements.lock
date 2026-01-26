@@ -51,6 +51,8 @@ beautifulsoup4==4.14.3
     # via markdownify
 blis==1.3.0
     # via thinc
+brotli==1.2.0
+    # via fonttools
 cachetools==5.5.2
     # via dspy
     # via google-auth
@@ -64,6 +66,7 @@ certifi==2025.4.26
     # via requests
 cffi==1.17.1
     # via soundfile
+    # via weasyprint
 cfgv==3.5.0
     # via pre-commit
 charset-normalizer==3.4.1
@@ -89,6 +92,8 @@ confection==0.1.5
     # via weasel
 contourpy==1.3.2
     # via matplotlib
+cssselect2==0.8.0
+    # via weasyprint
 cycler==0.12.1
     # via matplotlib
 cymem==2.0.11
@@ -133,8 +138,9 @@ filelock==3.18.0
 filetype==1.2.0
     # via marker-pdf
     # via surya-ocr
-fonttools==4.57.0
+fonttools==4.61.1
     # via matplotlib
+    # via weasyprint
 frozenlist==1.6.0
     # via aiohttp
     # via aiosignal
@@ -239,6 +245,7 @@ llvmlite==0.44.0
     # via numba
 lxml==5.4.0
     # via python-docx
+    # via python-pptx
 magicattr==0.1.6
     # via dspy
 mako==1.3.10
@@ -394,8 +401,10 @@ pillow==10.4.0
     # via marker-pdf
     # via matplotlib
     # via moviepy
+    # via python-pptx
     # via reportlab
     # via surya-ocr
+    # via weasyprint
 pip==25.1
     # via wenbi
 platformdirs==4.5.1
@@ -467,6 +476,8 @@ pydantic-settings==2.12.0
 pydub==0.25.1
     # via gradio
     # via wenbi
+pydyf==0.12.1
+    # via weasyprint
 pygments==2.19.1
     # via rich
 pyparsing==3.2.3
@@ -474,6 +485,8 @@ pyparsing==3.2.3
 pypdfium2==4.30.0
     # via pdftext
     # via surya-ocr
+pyphen==0.17.2
+    # via weasyprint
 python-dateutil==2.9.0.post0
     # via matplotlib
     # via pandas
@@ -487,6 +500,8 @@ python-dotenv==1.1.0
     # via surya-ocr
 python-multipart==0.0.20
     # via gradio
+python-pptx==1.0.2
+    # via wenbi
 pytorch-lightning==2.5.1.post0
     # via lightning
 pytorch-metric-learning==2.8.1
@@ -631,6 +646,11 @@ threadpoolctl==3.6.0
 tiktoken==0.9.0
     # via litellm
     # via openai-whisper
+tinycss2==1.5.1
+    # via cssselect2
+    # via weasyprint
+tinyhtml5==2.0.0
+    # via weasyprint
 tokenizers==0.22.2
     # via litellm
     # via transformers
@@ -709,6 +729,7 @@ typing-extensions==4.13.2
     # via pydantic
     # via pydantic-core
     # via python-docx
+    # via python-pptx
     # via pytorch-lightning
     # via referencing
     # via rich-click
@@ -737,11 +758,19 @@ wcwidth==0.3.1
     # via ftfy
 weasel==0.4.1
     # via spacy
+weasyprint==68.0
+    # via wenbi
+webencodings==0.5.1
+    # via cssselect2
+    # via tinycss2
+    # via tinyhtml5
 websockets==15.0.1
     # via google-genai
     # via gradio-client
 wrapt==1.17.2
     # via smart-open
+xlsxwriter==3.2.9
+    # via python-pptx
 xxhash==3.5.0
     # via datasets
 yarl==1.20.0
@@ -750,3 +779,5 @@ yt-dlp==2025.7.21
     # via wenbi
 zipp==3.21.0
     # via importlib-metadata
+zopfli==0.4.0
+    # via fonttools
