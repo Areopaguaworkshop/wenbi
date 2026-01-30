@@ -468,11 +468,75 @@ def is_markdown_file(file_path):
 
 
 def handle_ppt_command(args):
-    """Handle the ppt subcommand - combine speech and presentation slides"""
+    """Handle ppt subcommand - process video slides (default) or combine speech with presentation slides (backward compatibility)"""
     logger = setup_logging(args.verbose)
     
     if args.verbose:
         logger.debug("Starting ppt command")
+        logger.debug(f"Input: {args.input}")
+        
+    # Check if using video slides mode
+    if not args.video_slides and not args.slides_file:
+        print("Error: Either provide a slides file OR use --video-slides option")
+        sys.exit(1)
+        
+    # For video slides mode (new default behavior)
+    if getattr(args, 'video_mode', True) and not getattr(args, 'slides_mode', False):
+        from wenbi.video_slides import process_video_slides, validate_video_input
+        
+        if args.verbose:
+            logger.debug("Video slides mode enabled")
+        
+        # Validate video input
+        if not args.input:
+            print("Error: Video file is required for video slides mode")
+            sys.exit(1)
+        
+        is_url = args.input.startswith(("http://", "https://", "www."))
+        if is_url:
+            print("Error: Video URLs not supported yet for video slides mode. Please use local video file.")
+            sys.exit(1)
+        
+        if not validate_video_input(args.input, logger, args.verbose):
+            print(f"Error: Invalid video file: {args.input}")
+            sys.exit(1)
+        
+        # Prepare parameters
+        output_dir = args.output_dir or os.getcwd()
+        roi_coords = None
+        if args.manual_roi:
+            from wenbi.video_slides import manual_roi_override
+            roi_coords = manual_roi_override(args.input, logger, args.verbose)
+        
+        # Parse time range (default to first hour)
+        start_time = getattr(args, 'slides_start_time', "00:00:00") or "00:00:00"
+        end_time = getattr(args, 'slides_end_time', "01:00:00")
+        
+        try:
+            # Process video slides with time range
+            output_file = process_video_workflow(
+                input_path=args.input,
+                output_dir=output_dir,
+                cite_timestamps=args.cite_timestamps,
+                start_time=start_time,
+                end_time=end_time,
+                logger=logger,
+                verbose=args.verbose
+            )
+            
+            print("Video slides processing completed successfully!")
+            print(f"Output file: {output_file}")
+            
+        except Exception as e:
+            print(f"Error processing video slides: {e}")
+            if args.verbose:
+                logger.exception("Detailed error trace:")
+            sys.exit(1)
+            
+        return
+    
+    # Original PPT functionality (speech + slides)
+    if args.verbose:
         logger.debug(f"Speech input: {args.input}")
         logger.debug(f"Slides file: {args.slides_file}")
     
@@ -480,6 +544,20 @@ def handle_ppt_command(args):
     if not args.slides_file:
         print("Error: Slides file is required for ppt subcommand")
         sys.exit(1)
+    
+    if not os.path.isfile(args.slides_file):
+        print(f"Error: Slides file not found: {args.slides_file}")
+        sys.exit(1)
+    
+    # Check if slides_file is markdown (no format validation needed for markdown)
+    slides_is_markdown = is_markdown_file(args.slides_file)
+    
+    # Validate slides file format if not markdown
+    if not slides_is_markdown:
+        slides_ext = os.path.splitext(args.slides_file)[1].lower()
+        if slides_ext not in ['.pdf', '.pptx']:
+            print(f"Error: Slides file must be PDF, PPTX, or markdown file, got {slides_ext}")
+            sys.exit(1)
     
     if not os.path.isfile(args.slides_file):
         print(f"Error: Slides file not found: {args.slides_file}")
@@ -706,15 +784,28 @@ def main():
         add_global_args(academic_parser)
         academic_parser.set_defaults(func=handle_academic_command)
 
-        # PPT subcommand - combine speech and slides
-        ppt_parser = subparsers.add_parser('ppt', aliases=['p'], help='Combine speech with presentation slides')
+        # PPT subcommand - combine speech and slides, or extract slides from video
+        ppt_parser = subparsers.add_parser('ppt', aliases=['p'], help='Combine speech with presentation slides, or extract slides from video')
         add_global_args(ppt_parser)
-        ppt_parser.add_argument("slides_file", help="Path to slides file (PDF or PPTX)")
+        
+        # Input: video file by default, or slides file for backward compatibility
+        ppt_parser.add_argument("input", help="Video file/URL or slides file (PDF or PPTX)")
+        ppt_parser.add_argument("--video-mode", "-vm", action="store_true", default=True,
+                        help="Process video input (default: enabled)")
+        ppt_parser.add_argument("--slides-mode", "-sm", action="store_true", default=False,
+                        help="Process slides file (backward compatibility)")
+        
         ppt_parser.add_argument("--image-export-mode", "-iem", default="embedded",
                               choices=["none", "embedded", "referenced"],
                               help="Image export mode for slides (default: embedded)")
         ppt_parser.add_argument("--enhanced-alignment", "-ea", action="store_true", default=False,
                               help="Use enhanced similarity-based alignment instead of LLM alignment")
+        ppt_parser.add_argument("--manual-roi", "-mroi", action="store_true", default=False,
+                              help="Manually specify ROI coordinates instead of automatic detection")
+        ppt_parser.add_argument("--slides-start-time", "-sst", default="",
+                              help="Start time for slides extraction (format: HH:MM:SS, default: 00:00:00)")
+        ppt_parser.add_argument("--slides-end-time", "-set", default="01:00:00",
+                              help="End time for slides extraction (format: HH:MM:SS, default: 01:00:00, auto-adjusts if video shorter)")
         ppt_parser.set_defaults(func=handle_ppt_command)
 
         args = parser.parse_args()

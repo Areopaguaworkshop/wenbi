@@ -1,23 +1,11 @@
 import dspy
 import os
 import logging
-import litellm
+try:
+    import litellm
+except ImportError:
+    litellm = None
 from wenbi.utils import segment
-
-# Register custom model info for qwen3 with higher token limits
-# This overrides LiteLLM's default max_tokens of 40960
-litellm.register_model({
-    "ollama/qwen3": {
-        "max_tokens": 131072,
-        "max_input_tokens": 131072,
-        "max_output_tokens": 131072,
-        "input_cost_per_token": 0.0,
-        "output_cost_per_token": 0.0,
-        "litellm_provider": "ollama",
-        "mode": "chat",
-        "supports_function_calling": True,
-    }
-})
 
 
 def configure_lm(model_string, verbose=False, **kwargs):
@@ -48,19 +36,15 @@ def configure_lm(model_string, verbose=False, **kwargs):
             logger.debug(f"Ollama configuration: {config}")
         lm = dspy.LM(**config)
     elif provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable not set.")
         config.update(
             {
                 "api_base": "https://api.openai.com/v1",
-                "model": model_string.replace("openai/", ""),
-                "api_key": api_key,
+                "model": model_string,
             }
         )
         if verbose:
-            logger.debug(f"OpenAI configuration: model={config['model']}")
-        lm = dspy.OpenAI(**config)
+            logger.debug(f"OpenAI configuration: {config}")
+        lm = dspy.LM(**config)
     elif provider == "gemini":
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv(
             "GOOGLE_API_KEY_JSON")
@@ -620,6 +604,87 @@ def convert_slides_to_markdown(
         raise Exception(error_msg)
 
 
+def convert_single_slide_image(
+    image_path,
+    langs=['Chinese', 'English'],
+    output_dir=None,
+    verbose=False,
+):
+    """
+    OCR a single image using marker-pdf functionality
+    Returns dictionary with OCR text and metadata
+    """
+    logger = logging.getLogger(__name__)
+
+    if verbose:
+        logger.debug("=== Starting Single Image OCR ===")
+        logger.debug(f"Image file: {image_path}")
+
+    try:
+        from marker.converters.pdf import PdfConverter
+        from marker.models import create_model_dict
+        from PIL import Image
+        import tempfile
+
+        if verbose:
+            logger.debug("Loading marker-pdf models...")
+        
+        # Create model dict for conversion
+        artifact_dict = create_model_dict()
+
+        if verbose:
+            logger.debug("Processing single image...")
+
+        # Create a temporary PDF from the image to use marker-pdf
+        temp_dir = tempfile.mkdtemp()
+        temp_pdf = os.path.join(temp_dir, "temp.pdf")
+        
+        # Convert image to PDF
+        img = Image.open(image_path)
+        if img.mode == 'RGBA':
+            img = img.convert('RGB')
+        
+        img.save(temp_pdf, "PDF", resolution=150.0)
+        
+        # Convert PDF to markdown
+        converter = PdfConverter(
+            artifact_dict=artifact_dict,
+        )
+        
+        markdown_output = converter(temp_pdf)
+        
+        if verbose:
+            logger.debug(f"OCR completed. Text length: {len(markdown_output.markdown)} characters")
+
+        # Cleanup temp file
+        import shutil
+        shutil.rmtree(temp_dir)
+
+        # Extract confidence and metadata (marker doesn't provide this for images directly)
+        result = {
+            'text': markdown_output.markdown.strip(),
+            'confidence': 0.8,  # Default confidence for image OCR
+            'page_id': 1,
+            'metadata': {
+                'source': image_path,
+                'languages': langs
+            }
+        }
+
+        return result
+
+    except ImportError as e:
+        error_msg = f"marker-pdf library not installed. Please install it with: pip install marker-pdf"
+        if verbose:
+            logger.debug(error_msg)
+        raise ImportError(error_msg)
+    except Exception as e:
+        error_msg = f"Error OCR processing image: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
+
+
 def align_slides_with_speech(
     slide_content,
     speech_content,
@@ -652,9 +717,10 @@ def align_slides_with_speech(
 
     class AlignSlideWithSpeech(dspy.Signature):
         """
-        Find the speech content that aligns with the given slide content.
-        Use both exact phrase matching and semantic similarity.
-        Return the matching speech section and confidence level.
+        1. Find the given slide content aligns with speech content.
+        2. Use both exact phrase matching and semantic similarity.
+        3. Then put the slide content before the alignment of speech content.
+        4. keep the slide content and speech content 99% unchange. 
         """
 
         slide_content = dspy.InputField(
