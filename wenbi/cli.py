@@ -484,12 +484,18 @@ def handle_ppt_command(args):
     # Check if input is URL
     is_url = args.input.startswith(("http://", "https://", "www."))
     
+    # Input validation: any file/URL is valid since RW will handle it
+    # Only validate if we detect it's supposed to be a video for slide extraction
     if not is_url:
-        # Validate local video file
-        from wenbi.video_slides import validate_video_input
-        if not validate_video_input(args.input, logger, args.verbose):
-            print(f"Error: Invalid video file: {args.input}")
-            sys.exit(1)
+        # Try to detect if it's a video file by extension
+        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')
+        is_video = args.input.lower().endswith(video_extensions)
+        
+        if is_video:
+            from wenbi.video_slides import validate_video_input
+            if not validate_video_input(args.input, logger, args.verbose):
+                print(f"Error: Invalid video file: {args.input}")
+                sys.exit(1)
     
     try:
         # Step 1: Run RW command on the input to generate speech.md
@@ -538,54 +544,54 @@ def handle_ppt_command(args):
         if args.verbose:
             rw_cmd.append('--verbose')
         
-        if args.verbose:
-            logger.debug(f"Running rewrite command: {' '.join(rw_cmd)}")
-        
         try:
-            # Run rewrite command
-            result = subprocess.run(rw_cmd, capture_output=True, text=True, cwd='/home/ajiap/project/wenbi')
+            if args.verbose:
+                logger.debug(f"Running rewrite command: {' '.join(rw_cmd)}")
+                print("Step 1: Running rewrite subcommand to generate speech transcription...")
+            
+            # Run rewrite command with real-time output (not captured)
+            process = subprocess.Popen(rw_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                 text=True, universal_newlines=True, cwd='/home/ajiap/project/wenbi')
+            
+            # Stream output in real-time to show processing details
+            if args.verbose and process.stdout:
+                for line in iter(process.stdout.readline, ''):
+                    print(line.rstrip())
+            
+            # Wait for completion
+            process.wait()
+            
+            if process.returncode != 0:
+                print(f"Error: Rewrite command failed with return code {process.returncode}")
+                sys.exit(1)
             
             if args.verbose:
-                logger.debug(f"RW stdout: {result.stdout}")
-                if result.stderr:
-                    logger.debug(f"RW stderr: {result.stderr}")
+                print("Rewrite subcommand completed successfully!")
             
-            if result.returncode != 0:
-                print(f"Error: Rewrite command failed with return code {result.returncode}")
-                if result.stderr:
-                    print(f"Error details: {result.stderr}")
-                sys.exit(1)
+            # Find the generated _rewritten.md file in output directory
+            output_dir = args.output_dir or os.getcwd()
+            base_name = os.path.splitext(os.path.basename(args.input))[0]
             
-            # Parse output to get filename
-            # Look for line like "Output file: filename.md"
-            output_filename = None
-            for line in result.stdout.split('\n'):
-                if line.startswith('Output file:'):
-                    output_filename = line.split(':', 1)[1].strip()
+            # Look for _rewritten.md file pattern
+            speech_file = None
+            for file in os.listdir(output_dir):
+                if file.startswith(base_name) and file.endswith('_rewritten.md'):
+                    speech_file = os.path.join(output_dir, file)
                     break
             
-            if not output_filename:
-                print("Error: Could not determine output filename from rewrite command")
-                sys.exit(1)
+            if not speech_file:
+                # Fallback: look for any .md file with base_name
+                for file in os.listdir(output_dir):
+                    if file.startswith(base_name) and file.endswith('.md'):
+                        speech_file = os.path.join(output_dir, file)
+                        break
             
-            # Get absolute path
-            if not os.path.isabs(output_filename):
-                output_dir = args.output_dir or os.getcwd()
-                speech_file = os.path.join(output_dir, output_filename)
-            else:
-                speech_file = output_filename
+            if not speech_file:
+                print("Error: Could not find generated speech file from rewrite command")
+                sys.exit(1)
                 
         except Exception as e:
             print(f"Error running rewrite command: {e}")
-            sys.exit(1)
-        
-        # Get the speech.md file path
-        output_dir = rw_params['output_dir'] or os.getcwd()
-        base_name = os.path.splitext(os.path.basename(args.input))[0]
-        speech_file = os.path.join(output_dir, f"{base_name}.md")
-        
-        if not os.path.exists(speech_file):
-            print(f"Error: Speech file not generated: {speech_file}")
             sys.exit(1)
         
         if args.verbose:
