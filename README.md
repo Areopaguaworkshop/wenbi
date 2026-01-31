@@ -8,7 +8,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.140.72-orange.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/version-0.140.81-orange.svg)](pyproject.toml)
 
 Wenbi is a revolutionary CLI tool and web application that **focuses on media-to-text and text-to-text processing**. Whether you're a researcher, student, content creator, or professional, Wenbi transforms your raw audio/video content and existing text documents into beautifully formatted, academically rigorous documents.
 
@@ -105,7 +105,7 @@ wenbi your_content.mp4 --cite-timestamps --llm gemini/gemini-1.5-flash
 #### **🔧 Development installation with Rye**
 ```bash
 # Clone the repository for development
-git clone https://github.com/your-repo/wenbi.git # Replace with actual repo URL
+git clone https://github.com/areopagusworkshop/wenbi.git
 cd wenbi
 
 # Install dependencies with Rye
@@ -232,7 +232,32 @@ wenbi ppt lecture.mp4 slides.md \
 
 Subcommands share common options with the main command.
 
-For detailed PPT subcommand documentation, see [PPT_QUICK_REFERENCE.md](PPT_QUICK_REFERENCE.md), [PPT_SUBCOMMAND_USAGE_GUIDE.md](PPT_SUBCOMMAND_USAGE_GUIDE.md), and [PPT_MARKDOWN_INPUT_UPDATE.md](PPT_MARKDOWN_INPUT_UPDATE.md).
+#### **🎥 Video Slides Extraction (NEW!)**
+
+The PPT subcommand now supports extracting slides directly from video recordings:
+
+```bash
+# Extract slides from video with automatic detection
+wenbi ppt lecture_video.mp4 --video-slides --cite-timestamps
+
+# Extract with custom time range
+wenbi ppt lecture_video.mp4 --video-slides \
+  --slides-start-time 00:15:00 \
+  --slides-end-time 00:45:00 \
+  --cite-timestamps
+
+# Manual ROI override for slide area
+wenbi ppt lecture_video.mp4 --video-slides --manual-roi --cite-timestamps
+```
+
+**Video Slides Features:**
+- **Automatic Slide Detection**: AI-powered region of interest (ROI) detection
+- **Scene Change Detection**: Identifies slide transitions using PySceneDetect
+- **OCR Processing**: Extracts text content from slides using marker-pdf
+- **Timestamp Integration**: Precise timing with HH:MM:SS format
+- **Combined Output**: Embeds slide images with transcribed speech content
+
+For detailed PPT subcommand documentation, see [VIDEO_SLIDES_USAGE.md](VIDEO_SLIDES_USAGE.md).
 
 ### Batch Processing
 
@@ -397,7 +422,7 @@ To use Ollama models, ensure your Ollama server is running locally.
 
 ### 🚀 Ways to Contribute
 
-- **📝 Submit Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/your-repo/wenbi/issues)
+- **📝 Submit Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/areopagusworkshop/wenbi/issues)
 - **🔧 Code Contributions**: Improve transcription accuracy, add new LLM integrations, or enhance the timestamp citation system
 - **🌍 Translations**: Help us support more languages for global accessibility
 - **📚 Documentation**: Improve guides, add examples, or create tutorials
@@ -409,6 +434,13 @@ To use Ollama models, ensure your Ollama server is running locally.
 - **Discussions**: Share use cases, tips, and feature ideas
 - **Documentation**: Check our examples and configuration guides
 
+### 🎯 Recent Updates (v0.140.81)
+
+- **✨ NEW: Video Slides Extraction**: Extract slides directly from lecture recordings with automatic detection
+- **🔧 Enhanced PPT Integration**: Improved slide alignment and speech combination algorithms  
+- **⚡ Performance Optimizations**: Faster processing for large media files
+- **🐛 Bug Fixes**: Resolved timestamp formatting and transcription accuracy issues
+
 ### 🎯 Roadmap & Future Features
 
 - Real-time processing for live streams
@@ -417,10 +449,12 @@ To use Ollama models, ensure your Ollama server is running locally.
 - Integration with reference managers (Zotero, Mendeley)
 - REST API server for enterprise deployments
 - Advanced academic writing enhancement features
+- Multi-modal content analysis with video understanding
+- Collaborative editing and annotation features
 
 ## 📜 License
 
-This project is licensed under the **Apache-2.0 License** - see the [`LICENSE`](LICENSE) file for details.
+This project is licensed under the **Apache-2.0 License** - see the [`license.md`](license.md) file for details.
 
 ---
 
@@ -428,7 +462,7 @@ This project is licensed under the **Apache-2.0 License** - see the [`LICENSE`](
 
 **Get started today:**
 ```bash
-git clone https://github.com/your-repo/wenbi.git
+git clone https://github.com/areopagusworkshop/wenbi.git
 cd wenbi && rye sync && rye shell
 wenbi your_content.mp4 --cite-timestamps --llm gemini/gemini-1.5-flash
 ```
