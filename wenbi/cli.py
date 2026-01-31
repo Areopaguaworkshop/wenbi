@@ -468,17 +468,375 @@ def is_markdown_file(file_path):
 
 
 def handle_ppt_command(args):
-    """Handle ppt subcommand - process video slides (default) or combine speech with presentation slides (backward compatibility)"""
+    """Handle ppt subcommand - extract slides from video and combine with speech transcription"""
+    import sys
     logger = setup_logging(args.verbose)
     
     if args.verbose:
         logger.debug("Starting ppt command")
         logger.debug(f"Input: {args.input}")
-        
-    # Check if using video slides mode
-    if not args.video_slides and not args.slides_file:
-        print("Error: Either provide a slides file OR use --video-slides option")
+    
+    # Validate input
+    if not args.input:
+        print("Error: Video file or URL is required")
         sys.exit(1)
+    
+    # Check if input is URL
+    is_url = args.input.startswith(("http://", "https://", "www."))
+    
+    if not is_url:
+        # Validate local video file
+        from wenbi.video_slides import validate_video_input
+        if not validate_video_input(args.input, logger, args.verbose):
+            print(f"Error: Invalid video file: {args.input}")
+            sys.exit(1)
+    
+    try:
+        # Step 1: Run RW command on the input to generate speech.md
+        if args.verbose:
+            logger.debug("Step 1: Running rewrite subcommand to generate speech.md")
+        
+        # Load config if provided
+        config = load_config(args.config)
+        
+        # Prepare RW parameters with --cite-timestamps always enabled
+        rw_params = {
+            'input': args.input,
+            'config': args.config,
+            'output_dir': args.output_dir or config.get('output_dir', ''),
+            'llm': args.llm or config.get('llm', ''),
+            'chunk_length': args.chunk_length or config.get('chunk_length', 20),
+            'max_tokens': args.max_tokens or config.get('max_tokens', 130000),
+            'timeout': args.timeout or config.get('timeout', 3600),
+            'temperature': args.temperature or config.get('temperature', 0.1),
+            'lang': args.lang or config.get('lang', 'Chinese'),
+            'subcommand': 'rewrite',
+            'transcribe_model': args.transcribe_model or config.get('transcribe_model', 'large-v3'),
+            'multi_language': args.multi_language or config.get('multi_language', False),
+            'transcribe_lang': args.transcribe_lang or config.get('transcribe_lang', ''),
+            'output_wav': args.output_wav or config.get('output_wav', ''),
+            'cite_timestamps': True,  # Always enable timestamps for PPT
+            'verbose': args.verbose,
+            'start_time': getattr(args, 'start_time', ''),
+            'end_time': getattr(args, 'end_time', ''),
+        }
+        
+        # Build command to run rw subcommand with --cite-timestamps
+        import subprocess
+        import sys
+        
+        script_path = os.path.join(os.path.dirname(__file__), 'cli.py')
+        rw_cmd = [sys.executable, script_path, 'rw', args.input, '--cite-timestamps']
+        
+        # Add other relevant arguments
+        if args.output_dir:
+            rw_cmd.extend(['--output-dir', args.output_dir])
+        if args.llm:
+            rw_cmd.extend(['--llm', args.llm])
+        if args.lang:
+            rw_cmd.extend(['--lang', args.lang])
+        if args.verbose:
+            rw_cmd.append('--verbose')
+        
+        if args.verbose:
+            logger.debug(f"Running rewrite command: {' '.join(rw_cmd)}")
+        
+        try:
+            # Run rewrite command
+            result = subprocess.run(rw_cmd, capture_output=True, text=True, cwd='/home/ajiap/project/wenbi')
+            
+            if args.verbose:
+                logger.debug(f"RW stdout: {result.stdout}")
+                if result.stderr:
+                    logger.debug(f"RW stderr: {result.stderr}")
+            
+            if result.returncode != 0:
+                print(f"Error: Rewrite command failed with return code {result.returncode}")
+                if result.stderr:
+                    print(f"Error details: {result.stderr}")
+                sys.exit(1)
+            
+            # Parse output to get filename
+            # Look for line like "Output file: filename.md"
+            output_filename = None
+            for line in result.stdout.split('\n'):
+                if line.startswith('Output file:'):
+                    output_filename = line.split(':', 1)[1].strip()
+                    break
+            
+            if not output_filename:
+                print("Error: Could not determine output filename from rewrite command")
+                sys.exit(1)
+            
+            # Get absolute path
+            if not os.path.isabs(output_filename):
+                output_dir = args.output_dir or os.getcwd()
+                speech_file = os.path.join(output_dir, output_filename)
+            else:
+                speech_file = output_filename
+                
+        except Exception as e:
+            print(f"Error running rewrite command: {e}")
+            sys.exit(1)
+        
+        # Get the speech.md file path
+        output_dir = rw_params['output_dir'] or os.getcwd()
+        base_name = os.path.splitext(os.path.basename(args.input))[0]
+        speech_file = os.path.join(output_dir, f"{base_name}.md")
+        
+        if not os.path.exists(speech_file):
+            print(f"Error: Speech file not generated: {speech_file}")
+            sys.exit(1)
+        
+        if args.verbose:
+            logger.debug(f"Speech file generated: {speech_file}")
+        
+        # Step 2: Download video if URL input
+        video_path = args.input
+        if is_url:
+            if args.verbose:
+                logger.debug("Step 2: Downloading video from URL")
+            
+            from wenbi.utils import download_audio
+            
+            # Download video to current directory (for slide extraction)
+            try:
+                download_result = download_audio(
+                    args.input, 
+                    output_dir=output_dir,
+                    verbose=args.verbose
+                )
+                if download_result:
+                    video_path = download_result
+                else:
+                    print("Error: Failed to download video from URL")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"Error downloading video: {e}")
+                sys.exit(1)
+            
+            if args.verbose:
+                logger.debug(f"Video downloaded to: {video_path}")
+        
+        # Step 3: Extract slides from video using marker-pdf OCR
+        if args.verbose:
+            logger.debug("Step 3: Extracting slides from video")
+        
+        slides_data = extract_slides_from_video(
+            video_path,
+            output_dir=output_dir,
+            start_time=getattr(args, 'slides_start_time', "00:00:00") or "00:00:00",
+            end_time=getattr(args, 'slides_end_time', "01:00:00"),
+            manual_roi=getattr(args, 'manual_roi', False),
+            logger=logger,
+            verbose=args.verbose
+        )
+        
+        if not slides_data:
+            print("Warning: No slides extracted from video. Outputting speech.md only.")
+            print(f"Speech file: {speech_file}")
+            return
+        
+        if args.verbose:
+            logger.debug(f"Extracted {len(slides_data)} slides")
+        
+        # Step 4: Insert slides into speech.md based on timestamps
+        if args.verbose:
+            logger.debug("Step 4: Inserting slides into speech content")
+        
+        combined_content = insert_slides_into_speech(
+            speech_file,
+            slides_data,
+            output_dir=output_dir,
+            logger=logger,
+            verbose=args.verbose
+        )
+        
+        # Step 5: Save combined.md
+        combined_file = os.path.join(output_dir, f"{base_name}_combined.md")
+        with open(combined_file, "w", encoding="utf-8") as f:
+            f.write(combined_content)
+        
+        print("PPT processing completed successfully!")
+        print(f"Speech file: {speech_file}")
+        print(f"Combined file: {combined_file}")
+        
+        if args.verbose:
+            logger.debug(f"Combined output saved to: {combined_file}")
+        
+    except Exception as e:
+        print(f"Error during PPT processing: {e}")
+        if args.verbose:
+            logger.exception("Detailed error trace:")
+        sys.exit(1)
+
+
+def extract_slides_from_video(video_path, output_dir, start_time="00:00:00", end_time="01:00:00", manual_roi=False, logger=None, verbose=False):
+    """Extract slides from video using computer vision and OCR with marker-pdf"""
+    import tempfile
+    import cv2
+    from wenbi.video_slides import detect_slide_roi, detect_slide_changes, extract_frame_at_timestamp, ocr_slide_image
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    slides_data = []
+    temp_dir = tempfile.mkdtemp(prefix="wenbi_slides_")
+    
+    try:
+        if verbose:
+            logger.debug(f"Extracting slides from {video_path}")
+        
+        # Step 1: Detect ROI (Region of Interest) for slides
+        if manual_roi:
+            from wenbi.video_slides import manual_roi_override
+            roi_coords = manual_roi_override(video_path, logger, verbose)
+        else:
+            roi_coords = detect_slide_roi(video_path, logger, verbose)
+        
+        if verbose:
+            logger.debug(f"ROI coordinates: {roi_coords}")
+        
+        # Step 2: Detect slide transitions
+        slide_timestamps = detect_slide_changes(
+            video_path,
+            roi_coords,
+            start_time=start_time,
+            end_time=end_time,
+            logger=logger,
+            verbose=verbose
+        )
+        
+        if verbose:
+            logger.debug(f"Detected {len(slide_timestamps)} slide transitions")
+        
+        # Step 3: Extract frames at each slide transition and OCR
+        for i, slide_info in enumerate(slide_timestamps):
+            timestamp = slide_info['start_time']
+            if verbose:
+                logger.debug(f"Processing slide {i+1} at timestamp {timestamp}")
+            
+            # Extract frame
+            frame_path = extract_frame_at_timestamp(
+                video_path, 
+                timestamp, 
+                roi_coords=roi_coords, 
+                output_dir=temp_dir, 
+                logger=logger, 
+                verbose=verbose
+            )
+            
+            # OCR the frame using marker-pdf
+            ocr_result = ocr_slide_image(frame_path, output_dir=temp_dir, logger=logger, verbose=verbose)
+            slide_content = ocr_result.get('text', '')
+            
+            # Read image data for embedding if needed
+            image_data = None
+            if not slide_content or len(slide_content.strip()) < 10:
+                with open(frame_path, 'rb') as img_file:
+                    image_data = img_file.read()
+            
+            # Store slide data with timestamp
+            slides_data.append({
+                'timestamp': timestamp,
+                'content': slide_content,
+                'image_data': image_data,
+                'frame_path': frame_path
+            })
+        
+        return slides_data
+        
+    except Exception as e:
+        if verbose:
+            logger.error(f"Error extracting slides: {e}")
+        return []
+    
+    finally:
+        # Clean up temp directory
+        import shutil
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def insert_slides_into_speech(speech_file, slides_data, output_dir, logger=None, verbose=False):
+    """Insert slides into speech content based on timestamp matching"""
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    # Read speech content
+    with open(speech_file, "r", encoding="utf-8") as f:
+        speech_content = f.read()
+    
+    # Parse speech timestamps (format: HH:MM:SS-HH:MM:SS)
+    import re
+    timestamp_pattern = r'\[(\d{2}:\d{2}:\d{2})-(\d{2}:\d{2}:\d{2})\]'
+    speech_sections = re.split(timestamp_pattern, speech_content)
+    
+    combined_content = []
+    current_slide_index = 0
+    
+    # Reconstruct speech with timestamps
+    for i in range(0, len(speech_sections), 3):
+        if i + 2 < len(speech_sections):
+            start_time = speech_sections[i+1]
+            end_time = speech_sections[i+2]
+            content = speech_sections[i]
+            
+            # Add the speech section with timestamp
+            combined_content.append(f"[{start_time}-{end_time}]")
+            combined_content.append(content)
+            
+            # Find and insert slides that fall within this time range
+            while current_slide_index < len(slides_data):
+                slide_timestamp = slides_data[current_slide_index]['timestamp']
+                
+                # Convert slide timestamp to seconds for comparison
+                slide_seconds = parse_time_to_seconds(slide_timestamp)
+                start_seconds = parse_time_to_seconds(start_time)
+                end_seconds = parse_time_to_seconds(end_time)
+                
+                # If slide timestamp falls within this speech section
+                if start_seconds <= slide_seconds <= end_seconds:
+                    slide_info = slides_data[current_slide_index]
+                    
+                    # Add slide content
+                    combined_content.append(f"\n## Slide at {slide_timestamp}\n")
+                    
+                    if slide_info['content'] and len(slide_info['content'].strip()) > 10:
+                        # Use OCR text if confidence is good
+                        combined_content.append(f"> {slide_info['content']}\n")
+                    elif slide_info['image_data']:
+                        # Use embedded image if OCR failed
+                        import base64
+                        img_b64 = base64.b64encode(slide_info['image_data']).decode()
+                        combined_content.append(f"![Slide at {slide_timestamp}](data:image/png;base64,{img_b64})\n")
+                    
+                    current_slide_index += 1
+                elif slide_seconds > end_seconds:
+                    # Slide is beyond current section, break
+                    break
+                else:
+                    # Slide is before current section, skip it
+                    current_slide_index += 1
+    
+    return '\n'.join(combined_content)
+
+
+def parse_time_to_seconds(time_str):
+    """Convert HH:MM:SS or HH:MM:SS.ms to seconds"""
+    parts = time_str.split(':')
+    hours = int(parts[0])
+    minutes = int(parts[1])
+    seconds_parts = parts[2].split('.')
+    seconds = int(seconds_parts[0])
+    
+    total_seconds = hours * 3600 + minutes * 60 + seconds
+    
+    # Add milliseconds if present
+    if len(seconds_parts) > 1:
+        milliseconds = int(seconds_parts[1].ljust(3, '0')[:3])
+        total_seconds += milliseconds / 1000
+    
+    return total_seconds
         
     # For video slides mode (new default behavior)
     if getattr(args, 'video_mode', True) and not getattr(args, 'slides_mode', False):
@@ -754,11 +1112,15 @@ def handle_ppt_command(args):
 
 
 def main():
+    print("Debug: Starting main function...")
     download_all()
+    print("Debug: download_all completed")
 
     # Check if this is a subcommand
     subcommands = ['rewrite', 'rw', 'translate', 'tr', 'academic', 'ac', 'ppt', 'p']
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
+    print(f"Debug: sys.argv = {sys.argv}")
+    print(f"Debug: is_subcommand = {is_subcommand}")
 
     if is_subcommand:
         # Create parser for subcommands only
@@ -784,22 +1146,9 @@ def main():
         add_global_args(academic_parser)
         academic_parser.set_defaults(func=handle_academic_command)
 
-        # PPT subcommand - combine speech and slides, or extract slides from video
-        ppt_parser = subparsers.add_parser('ppt', aliases=['p'], help='Combine speech with presentation slides, or extract slides from video')
+        # PPT subcommand - extract slides from video and combine with speech
+        ppt_parser = subparsers.add_parser('ppt', aliases=['p'], help='Extract slides from video and combine with speech')
         add_global_args(ppt_parser)
-        
-        # Input: video file by default, or slides file for backward compatibility
-        ppt_parser.add_argument("input", help="Video file/URL or slides file (PDF or PPTX)")
-        ppt_parser.add_argument("--video-mode", "-vm", action="store_true", default=True,
-                        help="Process video input (default: enabled)")
-        ppt_parser.add_argument("--slides-mode", "-sm", action="store_true", default=False,
-                        help="Process slides file (backward compatibility)")
-        
-        ppt_parser.add_argument("--image-export-mode", "-iem", default="embedded",
-                              choices=["none", "embedded", "referenced"],
-                              help="Image export mode for slides (default: embedded)")
-        ppt_parser.add_argument("--enhanced-alignment", "-ea", action="store_true", default=False,
-                              help="Use enhanced similarity-based alignment instead of LLM alignment")
         ppt_parser.add_argument("--manual-roi", "-mroi", action="store_true", default=False,
                               help="Manually specify ROI coordinates instead of automatic detection")
         ppt_parser.add_argument("--slides-start-time", "-sst", default="",
@@ -814,7 +1163,7 @@ def main():
 
     # Main command (direct file processing)
     parser = argparse.ArgumentParser(
-        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs."
+        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), academic (ac), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
     )
     parser.add_argument("input", nargs="?", default="", help="Path to input file or URL")
     parser.add_argument("--config", "-c", default="", help="Path to YAML configuration file")
