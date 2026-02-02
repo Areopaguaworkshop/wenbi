@@ -29,6 +29,7 @@ model/**/*
 example/**/*
 *.wav
 *.md
+!README.md
 *.vtt
 *.bin
 *.csv
