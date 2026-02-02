@@ -232,32 +232,81 @@ wenbi ppt lecture.mp4 slides.md \
 
 Subcommands share common options with the main command.
 
-#### **🎥 Video Slides Extraction (NEW!)**
+#### **🎥 Advanced Video Slides Extraction**
 
-The PPT subcommand now supports extracting slides directly from video recordings:
+The PPT subcommand intelligently extracts slides directly from video presentations with a sophisticated multi-phase workflow:
+
+**Workflow Phases:**
+1. **Frame Extraction**: Extracts frames at regular intervals (default: every 60 seconds)
+2. **ROI Detection**: Detects slide region using hybrid OpenCV methods
+3. **Slide Cropping**: Isolates slide content from background/UI
+4. **Deduplication**: Removes duplicate slides using SSIM image comparison (default: 0.98 threshold)
+5. **OCR Processing**: Extracts text from unique slides using marker-pdf
+6. **Speech Transcription**: Transcribes full video audio (parallel process)
+7. **Merge**: Combines slides with speech by timestamp alignment
+
+**Quick Examples:**
 
 ```bash
-# Extract slides from video with automatic detection
-wenbi ppt lecture_video.mp4 --video-slides --cite-timestamps
+# Automatic slide detection with default settings
+wenbi ppt lecture.mp4 --cite-timestamps
 
-# Extract with custom time range
-wenbi ppt lecture_video.mp4 --video-slides \
-  --slides-start-time 00:15:00 \
-  --slides-end-time 00:45:00 \
-  --cite-timestamps
+# Custom frame extraction interval (every 2 minutes)
+wenbi ppt lecture.mp4 --frame-interval 120 --cite-timestamps
 
-# Manual ROI override for slide area
-wenbi ppt lecture_video.mp4 --video-slides --manual-roi --cite-timestamps
+# Manual ROI override (skip auto-detection)
+wenbi ppt lecture.mp4 --roi "100,50,1660,850"
+
+# Per-frame ROI detection (each frame gets own detection)
+wenbi ppt lecture.mp4 --each-roi
+
+# Process only first 30 minutes of video for slides
+wenbi ppt long_lecture.mp4 --end-time "00:30:00"
+
+# Full example with options
+wenbi ppt lecture.mp4 \
+  --frame-interval 60 \
+  --ssim-threshold 0.95 \
+  --llm gemini/gemini-1.5-flash \
+  --lang English \
+  --cite-timestamps \
+  --output-dir ./lecture_notes
 ```
 
-**Video Slides Features:**
-- **Automatic Slide Detection**: AI-powered region of interest (ROI) detection
-- **Scene Change Detection**: Identifies slide transitions using PySceneDetect
-- **OCR Processing**: Extracts text content from slides using marker-pdf
-- **Timestamp Integration**: Precise timing with HH:MM:SS format
-- **Combined Output**: Embeds slide images with transcribed speech content
+**Video Slides Options:**
+- `--frame-interval N`: Extract frames every N seconds (default: 60)
+- `--end-time HH:MM:SS`: Only extract slides up to this time (default: 01:00:00)
+- `--roi "x0,y0,x1,y1"`: Manual slide region override in pixels (skips auto-detection)
+- `--each-roi`: Enable per-frame ROI detection instead of single ROI
+- `--ssim-threshold F`: SSIM threshold for deduplication (default: 0.98, range: 0.0-1.0)
+- `--hist-threshold F`: Histogram correlation threshold (default: 0.15, range: 0.0-1.0)
+- `--max-slides N`: Maximum slides to extract (default: 100)
 
-For detailed PPT subcommand documentation, see [VIDEO_SLIDES_USAGE.md](VIDEO_SLIDES_USAGE.md).
+**Detection Algorithm:**
+The hybrid detection combines multiple OpenCV techniques for robust slide boundary detection:
+- **Canny Edge Detection**: Detects sharp boundaries in the image
+- **Morphological Operations**: Cleans edges and connects fragmented regions
+- **Color-based Thresholding**: Separates slides from background by color analysis
+- **Hough Line Detection**: Finds straight edges as backup method
+- **Intelligent Fallback**: Uses center 80% of frame if all methods fail
+
+**Output Structure:**
+```
+output_dir/
+├── _extracted_frames/          # All extracted frames
+├── {basename}_slides/          # Cropped slide images
+├── {basename}_slide.md         # Extracted slide content with OCR
+├── {basename}_rewritten.md     # Transcribed & rewritten speech
+└── {basename}_combined.md      # Final integrated document
+```
+
+**Use Cases:**
+- 📚 Lecture recordings → academic notes with slides
+- 🎓 Conference talks → proceedings with presentations
+- 📊 Training videos → documentation with slide content
+- 🎬 Educational content → structured reference material
+
+For detailed configuration and examples, see [VIDEO_SLIDES_USAGE.md](VIDEO_SLIDES_USAGE.md).
 
 ### Batch Processing
 
@@ -436,10 +485,12 @@ To use Ollama models, ensure your Ollama server is running locally.
 
 ### 🎯 Recent Updates (v0.140.81)
 
-- **✨ NEW: Video Slides Extraction**: Extract slides directly from lecture recordings with automatic detection
-- **🔧 Enhanced PPT Integration**: Improved slide alignment and speech combination algorithms  
-- **⚡ Performance Optimizations**: Faster processing for large media files
-- **🐛 Bug Fixes**: Resolved timestamp formatting and transcription accuracy issues
+- **✨ Enhanced Slide Detection**: Hybrid OpenCV algorithm combining Canny edges, morphological operations, color thresholding, and Hough lines for robust slide boundary detection
+- **🎯 Manual ROI Override**: Use `--roi "x0,y0,x1,y1"` to specify exact slide region, bypassing auto-detection entirely
+- **🔄 Intelligent Workflow**: Frame extraction → ROI detection → Cropping → Deduplication → OCR with clear progress feedback
+- **⏱️ Flexible Timing**: `--frame-interval` for frame extraction and `--end-time` for limiting slide processing (speech transcription always uses full video)
+- **🐛 Critical Bug Fixes**: Fixed frame deletion issue, corrected video_slides.py functions, resolved undefined variables in OCR pipeline
+- **📊 Better Logging**: Phase-by-phase progress reporting showing extracted frames, ROI detection, duplicates removed, and OCR status
 
 ### 🎯 Roadmap & Future Features
 
