@@ -1,0 +1,8 @@
+output_dir: "./output"
+transcribe_model: "large-v3-turbo"
+inputs:
+  # - input: "/home/ajiap/Documents/GCDFL-shared/2024/Lydia-20240607-升天节.mp4"
+  # - input: "/home/ajiap/Documents/GCDFL-shared/2024/Lydia-20240816-圣母安息.mp4"
+  # - input: "/home/ajiap/Documents/GCDFL-shared/2024/lydia-20241018-calling.mp4"
+  - input: "/home/ajiap/Documents/GCDFL-shared/2024/Guoziran-202412200-byzantine-under-Islam.mp4"
+  - input: "/home/ajiap/Documents/GCDFL-shared/2024/Lars2-Lutherian-China-20240920.mp4"
