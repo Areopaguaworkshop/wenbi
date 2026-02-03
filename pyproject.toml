@@ -31,6 +31,7 @@ dependencies = [
     "ffmpeg-python>=0.2.0",
     "srtranslator>=0.3.9",
     "scenedetect>=0.6.4",
+    "ultralytics>=8.4.11",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"

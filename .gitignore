@@ -30,6 +30,7 @@ example/**/*
 *.wav
 *.md
 !README.md
+*.pt
 *.vtt
 *.bin
 *.csv

@@ -34,7 +34,180 @@ except ImportError:
     ffmpeg = None
 import re
 
+# Import ultralytics for SAM2 slide segmentation
+try:
+    from ultralytics import SAM
+    SAMAvailable = True
+except ImportError:
+    SAMAvailable = False
+    SAM = None
+
+# Alternative models for future use:
+# - rtdetr-l.pt: Real-time Detection Transformer for object detection
+# - yolo26n-seg.pt: YOLO segmentation model
+
 from wenbi.model import convert_single_slide_image
+
+
+def detect_slide_roi_with_yolo(
+    frame_path: str, logger=None, verbose=False
+) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Detect slide area using SAM2-B segmentation model.
+    Segments frame, identifies speaker box in corners, removes it, and returns slide ROI.
+    
+    Args:
+        frame_path: Path to frame image file
+        logger: Optional logger instance
+        verbose: Enable verbose logging
+        
+    Returns:
+        Tuple of (x0, y0, x1, y1) coordinates, or None if speaker not detected (fallback to full-frame)
+    """
+    if not SAMAvailable:
+        if logger:
+            logger.warning("SAM not available. Install with: rye add ultralytics")
+        return None
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    try:
+        if verbose and logger:
+            logger.debug(f"Loading SAM2-B model for slide detection")
+        
+        # Load pre-trained SAM2-B model
+        model = SAM("sam2_b.pt")
+        
+        if verbose and logger:
+            logger.debug(f"Running SAM2 segmentation on frame: {frame_path}")
+        
+        # Run segmentation inference
+        results = model(frame_path, verbose=False)
+        
+        if not results or len(results) == 0:
+            if logger:
+                logger.warning("SAM2 segmentation returned no results")
+            return None
+        
+        result = results[0]
+        
+        # Check if segmentation masks exist
+        if not hasattr(result, 'masks') or result.masks is None:
+            if logger:
+                logger.warning("No segmentation masks found in SAM2 results")
+            return None
+        
+        masks = result.masks.data  # Get mask tensor
+        
+        if masks.shape[0] == 0:
+            if logger:
+                logger.warning("No objects segmented in frame")
+            return None
+        
+        img = cv2.imread(frame_path)
+        if img is None:
+            if logger:
+                logger.warning(f"Could not read frame: {frame_path}")
+            return None
+        
+        img_height, img_width = img.shape[:2]
+        
+        # Corner thresholds - 25% from edges to identify speaker box region
+        x_left_threshold = int(img_width * 0.25)
+        x_right_threshold = int(img_width * 0.75)
+        y_top_threshold = int(img_height * 0.25)
+        y_bottom_threshold = int(img_height * 0.75)
+        
+        speaker_mask = None
+        corner_location = None
+        
+        # Find mask in corners (likely speaker box)
+        for mask_tensor in masks:
+            mask = mask_tensor.cpu().numpy().astype(np.uint8)
+            
+            # Resize mask to image dimensions if needed
+            if mask.shape != (img_height, img_width):
+                mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+            
+            # Find bounding box of this mask
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                continue
+            
+            x, y, w, h = cv2.boundingRect(contours[0])
+            x0, y0, x1, y1 = x, y, x + w, y + h
+            
+            # Check if this mask is in a corner
+            in_left = x0 < x_left_threshold
+            in_right = x1 > x_right_threshold
+            in_top = y0 < y_top_threshold
+            in_bottom = y1 > y_bottom_threshold
+            
+            if (in_left or in_right) and (in_top or in_bottom):
+                speaker_mask = mask
+                
+                if in_top and in_left:
+                    corner_location = "top-left"
+                elif in_top and in_right:
+                    corner_location = "top-right"
+                elif in_bottom and in_left:
+                    corner_location = "bottom-left"
+                elif in_bottom and in_right:
+                    corner_location = "bottom-right"
+                
+                if verbose and logger:
+                    logger.debug(f"Found speaker mask in {corner_location} corner")
+                break
+        
+        # If no speaker box detected in corners, use full-frame fallback
+        if speaker_mask is None:
+            if verbose and logger:
+                logger.debug("No speaker box detected in corners - using full-frame fallback")
+            return None  # Signal to use full-frame OCR (like --roi "")
+        
+        # Create inverse mask: remove speaker, keep slides
+        inverted_mask = 1 - speaker_mask
+        inverted_mask = inverted_mask.astype(np.uint8) * 255
+        
+        # Clean up inverted mask with morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        inverted_mask = cv2.morphologyEx(inverted_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        inverted_mask = cv2.morphologyEx(inverted_mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        
+        # Find contours in inverted mask
+        contours, _ = cv2.findContours(inverted_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if not contours:
+            if verbose and logger:
+                logger.debug("No contours found in inverted mask - using full-frame fallback")
+            return None
+        
+        # Get largest contour (should be slide area)
+        largest_contour = max(contours, key=cv2.contourArea)
+        largest_area = cv2.contourArea(largest_contour)
+        
+        # Adaptive area threshold: at least 5% of frame
+        min_area = int(img_width * img_height * 0.05)
+        
+        if largest_area <= min_area:
+            if verbose and logger:
+                logger.debug(f"Largest contour too small ({largest_area} < {min_area}) - using full-frame fallback")
+            return None
+        
+        # Get bounding box of slide area
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        slide_roi = (x, y, x + w, y + h)
+        
+        if verbose and logger:
+            logger.debug(f"Detected slide ROI with speaker box removed: {slide_roi}")
+        
+        return slide_roi
+        
+    except Exception as e:
+        if logger:
+            logger.error(f"Error in SAM2 slide detection: {e}")
+        return None
 
 
 def calculate_text_similarity(text1: str, text2: str) -> float:
@@ -347,11 +520,16 @@ def detect_slide_roi(
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        # Priority 1: Reduce blur kernel to preserve edge details
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
 
-        # Edge detection
-        edges = cv2.Canny(blurred, 50, 150)
+        # Priority 1: Lower Canny thresholds to catch fainter edges
+        edges = cv2.Canny(blurred, 30, 100)
+
+        # Priority 1: Add morphological operations to connect broken edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        edges = cv2.dilate(edges, kernel, iterations=1)
+        edges = cv2.erode(edges, kernel, iterations=1)
 
         # Find contours
         contours, _ = cv2.findContours(
@@ -362,15 +540,16 @@ def detect_slide_roi(
         rectangles = []
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area > 10000:  # Filter small objects
+            # Priority 2: Lower area threshold to detect smaller edge fragments
+            if area > 5000:
                 x, y, w, h = cv2.boundingRect(contour)
-                aspect_ratio = w / h
+                aspect_ratio = w / h if h > 0 else 0
 
-                # Typical slide aspect ratios (4:3, 16:9, 16:10)
-                if 0.75 <= aspect_ratio <= 2.0:
+                # Tighter aspect ratio constraints (typical slide dimensions)
+                if 0.7 <= aspect_ratio <= 2.0:
                     rectangles.append((x, y, w, h, area))
 
-        # Sort by area, take the largest rectangle that covers 70-80% of frame
+        # Sort by area, take the largest rectangle that covers appropriate % of frame
         frame_height, frame_width = frame.shape[:2]
         frame_area = frame_width * frame_height
 
@@ -378,17 +557,23 @@ def detect_slide_roi(
             x, y, w, h, area = rect
             coverage = area / frame_area
 
-            if 0.7 <= coverage <= 0.85:  # 70-85% coverage
-                slide_areas.append((x, y, x + w, y + h))
+            # Stricter coverage range to avoid detecting full frame
+            if 0.70 <= coverage <= 0.80:
+                # Add right-edge margin to exclude speaker box region
+                # Reduce right edge by 15% to keep away from frame right edge
+                x1_original = x + w
+                x1_adjusted = int(x1_original * 0.85)  # Move right edge 15% inward
+                
+                slide_areas.append((x, y, x1_adjusted, y + h))
                 break
 
-# If no suitable rectangle found, use default assumption
+        # If no suitable rectangle found, use default assumption
         if len(slide_areas) == frame_count // 30:
-            # Default: use specific coordinates (0.1, 0.1, 0.9, 0.9)
-            default_x0 = int(frame_width * 0.1)
-            default_y0 = int(frame_height * 0.1)
-            default_x1 = int(frame_width * 0.9)
-            default_y1 = int(frame_height * 0.9)
+            # Default: use specific coordinates (0.05, 0.05, 0.95, 0.95)
+            default_x0 = int(frame_width * 0.05)
+            default_y0 = int(frame_height * 0.05)
+            default_x1 = int(frame_width * 0.95)
+            default_y1 = int(frame_height * 0.95)
             slide_areas.append((default_x0, default_y0, default_x1, default_y1))
 
     cap.release()
@@ -1292,12 +1477,30 @@ def crop_and_save_slides(
         slide_path = os.path.join(slides_dir, slide_filename)
         
         try:
-            # Crop frame using ROI
+            # Force left edge to start from frame edge, extend bottom edge
+            x0, y0, x1, y1 = roi_coords
+            
+            # Get frame dimensions
+            img_test = cv2.imread(frame_path)
+            if img_test is not None:
+                frame_h, frame_w = img_test.shape[:2]
+                
+                # Force left edge to 0, keep top/right as is, extend bottom
+                x0_safe = 0
+                y0_safe = y0
+                x1_safe = min(frame_w, x1)
+                y1_safe = min(frame_h, y1 + 20)  # Extend bottom by 20 pixels
+                
+                roi_coords_safe = (x0_safe, y0_safe, x1_safe, y1_safe)
+            else:
+                roi_coords_safe = roi_coords
+            
+            # Crop frame using safe ROI
             if FFmpegAvailable:
-                crop_w = roi_coords[2] - roi_coords[0]
-                crop_h = roi_coords[3] - roi_coords[1]
-                crop_x = roi_coords[0]
-                crop_y = roi_coords[1]
+                crop_w = roi_coords_safe[2] - roi_coords_safe[0]
+                crop_h = roi_coords_safe[3] - roi_coords_safe[1]
+                crop_x = roi_coords_safe[0]
+                crop_y = roi_coords_safe[1]
                 
                 (
                     ffmpeg.input(frame_path)
@@ -1316,8 +1519,8 @@ def crop_and_save_slides(
                 # Fallback to OpenCV
                 img = cv2.imread(frame_path)
                 if img is not None:
-                    x0, y0, x1, y1 = roi_coords
-                    cropped_img = img[y0:y1, x0:x1]
+                    x0_s, y0_s, x1_s, y1_s = roi_coords_safe
+                    cropped_img = img[y0_s:y1_s, x0_s:x1_s]
                     cv2.imwrite(slide_path, cropped_img)
             
             # Update frame data with cropped slide path
