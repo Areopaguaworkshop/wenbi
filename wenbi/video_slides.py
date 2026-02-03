@@ -34,16 +34,16 @@ except ImportError:
     ffmpeg = None
 import re
 
-# Import ultralytics for SAM2 slide segmentation
+# Import ultralytics for RT-DETR slide detection
 try:
-    from ultralytics import SAM
-    SAMAvailable = True
+    from ultralytics import RTDETR
+    RTDETRAvailable = True
 except ImportError:
-    SAMAvailable = False
-    SAM = None
+    RTDETRAvailable = False
+    RTDETR = None
 
 # Alternative models for future use:
-# - rtdetr-l.pt: Real-time Detection Transformer for object detection
+# - sam2_b.pt: SAM2 segmentation model (slower but more accurate)
 # - yolo26n-seg.pt: YOLO segmentation model
 
 from wenbi.model import convert_single_slide_image
@@ -53,8 +53,9 @@ def detect_slide_roi_with_yolo(
     frame_path: str, logger=None, verbose=False
 ) -> Optional[Tuple[int, int, int, int]]:
     """
-    Detect slide area using SAM2-B segmentation model.
-    Segments frame, identifies speaker box in corners, removes it, and returns slide ROI.
+    Detect slide area using RT-DETR-v2 object detection model.
+    Detects speaker box in corners and creates mask to remove it,
+    isolating the slide area. Fast and efficient detection.
     
     Args:
         frame_path: Path to frame image file
@@ -62,49 +63,17 @@ def detect_slide_roi_with_yolo(
         verbose: Enable verbose logging
         
     Returns:
-        Tuple of (x0, y0, x1, y1) coordinates, or None if speaker not detected (fallback to full-frame)
+        Tuple of (x0, y0, x1, y1) coordinates, or None if no detection (fallback to full-frame)
     """
-    if not SAMAvailable:
+    if not RTDETRAvailable:
         if logger:
-            logger.warning("SAM not available. Install with: rye add ultralytics")
+            logger.warning("RTDETR not available. Install with: rye add ultralytics")
         return None
     
     if logger is None:
         logger = logging.getLogger(__name__)
     
     try:
-        if verbose and logger:
-            logger.debug(f"Loading SAM2-B model for slide detection")
-        
-        # Load pre-trained SAM2-B model
-        model = SAM("sam2_b.pt")
-        
-        if verbose and logger:
-            logger.debug(f"Running SAM2 segmentation on frame: {frame_path}")
-        
-        # Run segmentation inference
-        results = model(frame_path, verbose=False)
-        
-        if not results or len(results) == 0:
-            if logger:
-                logger.warning("SAM2 segmentation returned no results")
-            return None
-        
-        result = results[0]
-        
-        # Check if segmentation masks exist
-        if not hasattr(result, 'masks') or result.masks is None:
-            if logger:
-                logger.warning("No segmentation masks found in SAM2 results")
-            return None
-        
-        masks = result.masks.data  # Get mask tensor
-        
-        if masks.shape[0] == 0:
-            if logger:
-                logger.warning("No objects segmented in frame")
-            return None
-        
         img = cv2.imread(frame_path)
         if img is None:
             if logger:
@@ -113,58 +82,77 @@ def detect_slide_roi_with_yolo(
         
         img_height, img_width = img.shape[:2]
         
-        # Corner thresholds - 25% from edges to identify speaker box region
-        x_left_threshold = int(img_width * 0.25)
-        x_right_threshold = int(img_width * 0.75)
-        y_top_threshold = int(img_height * 0.25)
-        y_bottom_threshold = int(img_height * 0.75)
+        if verbose and logger:
+            logger.debug(f"Loading RT-DETR model for slide detection")
         
-        speaker_mask = None
+        # Load pre-trained RT-DETR model (fast object detection)
+        model = RTDETR("rtdetr-l.pt")
+        
+        if verbose and logger:
+            logger.debug(f"Running RT-DETR detection on frame: {frame_path}")
+        
+        # Run detection (no prompts needed, model auto-detects objects)
+        results = model(frame_path, verbose=False)
+        
+        if not results or len(results) == 0:
+            if logger and verbose:
+                logger.debug("RT-DETR detection returned no results, using full-frame fallback")
+            return None
+        
+        result = results[0]
+        
+        # Check if bounding boxes exist
+        if not hasattr(result, 'boxes') or result.boxes is None or len(result.boxes) == 0:
+            if verbose and logger:
+                logger.debug("No objects detected by RT-DETR, using full-frame fallback")
+            return None
+        
+        # Define corner regions to identify speaker box
+        corner_regions = {
+            "top-right": (int(img_width * 0.6), 0, img_width, int(img_height * 0.4)),
+            "top-left": (0, 0, int(img_width * 0.4), int(img_height * 0.4)),
+            "bottom-right": (int(img_width * 0.6), int(img_height * 0.6), img_width, img_height),
+            "bottom-left": (0, int(img_height * 0.6), int(img_width * 0.4), img_height),
+        }
+        
+        speaker_box = None
         corner_location = None
         
-        # Find mask in corners (likely speaker box)
-        for mask_tensor in masks:
-            mask = mask_tensor.cpu().numpy().astype(np.uint8)
+        # Find largest object in corner regions (likely speaker)
+        for box in result.boxes:
+            x0, y0, x1, y1 = box.xyxy[0].cpu().numpy().astype(int)
+            box_area = (x1 - x0) * (y1 - y0)
             
-            # Resize mask to image dimensions if needed
-            if mask.shape != (img_height, img_width):
-                mask = cv2.resize(mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
-            
-            # Find bounding box of this mask
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if not contours:
-                continue
-            
-            x, y, w, h = cv2.boundingRect(contours[0])
-            x0, y0, x1, y1 = x, y, x + w, y + h
-            
-            # Check if this mask is in a corner
-            in_left = x0 < x_left_threshold
-            in_right = x1 > x_right_threshold
-            in_top = y0 < y_top_threshold
-            in_bottom = y1 > y_bottom_threshold
-            
-            if (in_left or in_right) and (in_top or in_bottom):
-                speaker_mask = mask
+            # Check if box is in any corner region
+            for corner_name, (cx0, cy0, cx1, cy1) in corner_regions.items():
+                # Check if box centroid or significant overlap is in corner
+                box_cx = (x0 + x1) / 2
+                box_cy = (y0 + y1) / 2
                 
-                if in_top and in_left:
-                    corner_location = "top-left"
-                elif in_top and in_right:
-                    corner_location = "top-right"
-                elif in_bottom and in_left:
-                    corner_location = "bottom-left"
-                elif in_bottom and in_right:
-                    corner_location = "bottom-right"
-                
-                if verbose and logger:
-                    logger.debug(f"Found speaker mask in {corner_location} corner")
-                break
+                if cx0 <= box_cx <= cx1 and cy0 <= box_cy <= cy1:
+                    # This box is in a corner, likely speaker
+                    if speaker_box is None or box_area > (speaker_box[2] - speaker_box[0]) * (speaker_box[3] - speaker_box[1]):
+                        speaker_box = (x0, y0, x1, y1)
+                        corner_location = corner_name
+                        
+                        if verbose and logger:
+                            logger.debug(f"RT-DETR detected object in {corner_name} corner: {speaker_box} (area: {box_area})")
+                    break
         
-        # If no speaker box detected in corners, use full-frame fallback
-        if speaker_mask is None:
+        # If no speaker box detected in corners, use generic fallback
+        if speaker_box is None:
             if verbose and logger:
-                logger.debug("No speaker box detected in corners - using full-frame fallback")
-            return None  # Signal to use full-frame OCR (like --roi "")
+                logger.debug("No speaker box detected in corners, using generic speaker coordinates")
+            
+            # Create mask for top-right corner (most common presenter position)
+            corner_name = "top-right"
+            speaker_box = corner_regions[corner_name]
+            corner_location = corner_name
+        
+        # Create binary mask from speaker box
+        speaker_mask = np.zeros((img_height, img_width), dtype=np.uint8)
+        x0, y0, x1, y1 = speaker_box
+        speaker_mask[max(0, y0):min(img_height, y1), max(0, x0):min(img_width, x1)] = 1
         
         # Create inverse mask: remove speaker, keep slides
         inverted_mask = 1 - speaker_mask
@@ -200,13 +188,13 @@ def detect_slide_roi_with_yolo(
         slide_roi = (x, y, x + w, y + h)
         
         if verbose and logger:
-            logger.debug(f"Detected slide ROI with speaker box removed: {slide_roi}")
+            logger.debug(f"Detected slide ROI with {corner_location} speaker box removed: {slide_roi}")
         
         return slide_roi
         
     except Exception as e:
         if logger:
-            logger.error(f"Error in SAM2 slide detection: {e}")
+            logger.error(f"Error in RT-DETR slide detection: {e}")
         return None
 
 
@@ -1460,6 +1448,7 @@ def crop_and_save_slides(
         return frames_data
     
     cropped_frames = []
+    slide_counter = 1
     
     for frame_data in frames_data:
         roi_coords = frame_data.get('roi_coords')
@@ -1471,9 +1460,9 @@ def crop_and_save_slides(
         frame_path = frame_data['frame_path']
         timestamp = frame_data['timestamp']
         
-        # Clean timestamp for filename
+        # Clean timestamp for filename: {base_name}_slide{N}_{timestamp}.jpeg
         clean_ts = re.sub(r"[:.]", "_", timestamp)
-        slide_filename = f"slide_{clean_ts}.png"
+        slide_filename = f"{base_name}_slide{slide_counter}_{clean_ts}.jpeg"
         slide_path = os.path.join(slides_dir, slide_filename)
         
         try:
@@ -1511,7 +1500,7 @@ def crop_and_save_slides(
                         crop_x,
                         crop_y,
                     )
-                    .output(slide_path, vframes=1, format="image2", vcodec="png")
+                    .output(slide_path, vframes=1, format="image2", vcodec="mjpeg")
                     .overwrite_output()
                     .run(capture_stdout=True, capture_stderr=True)
                 )
@@ -1527,6 +1516,7 @@ def crop_and_save_slides(
             cropped_frame_data = frame_data.copy()
             cropped_frame_data['cropped_slide_path'] = slide_path
             cropped_frames.append(cropped_frame_data)
+            slide_counter += 1
             
             if verbose and logger:
                 logger.debug(f"Cropped slide: {slide_path}")

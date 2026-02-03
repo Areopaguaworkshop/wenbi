@@ -635,9 +635,13 @@ def convert_single_slide_image(
         if verbose:
             logger.debug("Processing single image...")
 
-        # Create a temporary PDF from the image to use marker-pdf
-        temp_dir = tempfile.mkdtemp()
-        temp_pdf = os.path.join(temp_dir, "temp.pdf")
+        # Use output_dir if provided, otherwise use temp directory
+        if output_dir and os.path.exists(output_dir):
+            work_dir = output_dir
+        else:
+            work_dir = tempfile.mkdtemp()
+        
+        temp_pdf = os.path.join(work_dir, "temp_ocr.pdf")
         
         # Convert image to PDF
         img = Image.open(image_path)
@@ -655,10 +659,18 @@ def convert_single_slide_image(
         
         if verbose:
             logger.debug(f"OCR completed. Text length: {len(markdown_output.markdown)} characters")
+            logger.debug(f"Images output to: {work_dir}")
 
-        # Cleanup temp file
+        # Cleanup temp PDF only if we created a temp directory
         import shutil
-        shutil.rmtree(temp_dir)
+        if not (output_dir and os.path.exists(output_dir)):
+            shutil.rmtree(work_dir)
+        else:
+            # Cleanup just the temp PDF if using output_dir
+            try:
+                os.remove(temp_pdf)
+            except:
+                pass
 
         # Extract confidence and metadata (marker doesn't provide this for images directly)
         result = {

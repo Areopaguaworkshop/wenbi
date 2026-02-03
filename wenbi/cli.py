@@ -579,72 +579,6 @@ def is_markdown_file(file_path):
     return ext in [".md", ".markdown"]
 
 
-def _process_slides_with_roi(frames_with_roi, output_dir, base_name, logger, verbose):
-    """Helper function to crop slides and run OCR on them"""
-    from wenbi.video_slides import (
-        crop_and_save_slides,
-        ocr_slide_image,
-    )
-    
-    # Crop frames according to ROI
-    cropped_frames = crop_and_save_slides(
-        frames_with_roi,
-        output_dir=output_dir,
-        base_name=base_name,
-        logger=logger,
-        verbose=verbose,
-    )
-    
-    # OCR on cropped slides
-    slides_data = []
-    for slide_data in cropped_frames:
-        cropped_path = slide_data.get('cropped_slide_path')
-        timestamp = slide_data.get('timestamp', '')
-        
-        if not cropped_path or not os.path.exists(cropped_path):
-            if verbose and logger:
-                logger.warning(f"No cropped slide path for frame at {timestamp}")
-            continue
-        
-        try:
-            ocr_result = ocr_slide_image(
-                cropped_path, output_dir=output_dir, logger=logger, verbose=verbose
-            )
-            
-            slide_content = ocr_result.get("text", "")
-            image_data = None
-            
-            # Embed image if OCR text is short/unreliable
-            if (
-                not slide_content
-                or len(slide_content.strip()) < 15
-                or ocr_result.get("failed", False)
-            ):
-                try:
-                    with open(cropped_path, "rb") as img_file:
-                        image_data = img_file.read()
-                except Exception as e:
-                    if verbose and logger:
-                        logger.warning(f"Failed to read image for embedding: {e}")
-            
-            slides_data.append({
-                "timestamp": timestamp,
-                "content": slide_content,
-                "image_data": image_data,
-                "frame_path": cropped_path,
-            })
-            
-            if verbose and logger:
-                logger.debug(f"OCR completed for slide at {timestamp}")
-                
-        except Exception as e:
-            if verbose and logger:
-                logger.warning(f"Error during OCR for slide at {timestamp}: {e}")
-            continue
-    
-    return slides_data
-
-
 def handle_ppt_command(args):
     """Handle ppt subcommand - extract slides from video and combine with speech transcription"""
     import subprocess
@@ -652,9 +586,8 @@ def handle_ppt_command(args):
 
     logger = setup_logging(args.verbose)
 
-    print("Debug: Entered handle_ppt_command")
     if args.verbose:
-        logger.debug("Starting ppt command with new workflow")
+        logger.debug("Starting PPT workflow")
         logger.debug(f"Input: {args.input}")
 
     # Validate input
@@ -671,25 +604,17 @@ def handle_ppt_command(args):
         from wenbi.video_slides import (
             validate_video_input,
             extract_all_frames_from_video,
-            detect_slide_rectangles_in_frames,
-            crop_and_save_slides,
             deduplicate_slides_by_image,
-            extract_frame_at_timestamp,
             ocr_slide_image,
-            manual_roi_override,
         )
 
-        print("Debug handle_ppt_command: About to validate video input")
         if not validate_video_input(args.input, logger, args.verbose):
             print(f"Error: Invalid video file: {args.input}")
             sys.exit(1)
-        print("Debug handle_ppt_command: Video validation passed")
 
     video_path = args.input
 
     try:
-        print("Debug handle_ppt_command: Inside try block")
-        print(f"Debug handle_ppt_command: video_path={video_path}, is_url={is_url}")
         # Step 1: Download video if URL input
         if is_url:
             if args.verbose:
@@ -713,20 +638,13 @@ def handle_ppt_command(args):
             if args.verbose:
                 logger.debug(f"Video downloaded to: {video_path}")
 
-        # Step 2 (New Step 1): Extract slides from video and save to _slide.md
-        if args.verbose:
-            logger.debug("Step 2: Extracting slides from video and saving to _slide.md")
-
-        # Extract slides directly from video without trimming
-        # (trimming can be slow; more efficient to use frame_interval to skip frames)
-        video_for_slides = video_path
-        trimmed_temp_dir = None
+        # Configure time range for slide extraction
         slides_start = getattr(args, "slides_start_time", "00:00:10") or "00:00:10"
         slides_end = getattr(args, "slides_end_time", "01:00:00") or "01:00:00"
+        video_for_slides = video_path
 
-# Step 2: New PPT Workflow (simplified - no PySceneDetect)
-        if args.verbose and logger:
-            logger.debug("Starting new PPT workflow with frame extraction and ROI detection")
+        if args.verbose:
+            logger.debug("Starting PPT workflow with frame extraction and deduplication")
         
         # Phase 1: Extract ALL frames from video at regular intervals
         from wenbi.video_slides import (
@@ -747,7 +665,7 @@ def handle_ppt_command(args):
         )
         
         if not all_frames:
-            print("Warning: No frames extracted from video. Proceeding with speech transcription only.")
+            print("⚠ Warning: No frames extracted from video. Proceeding with speech transcription only.")
             slides_data = []
         else:
             print(f"✓ Phase 1: Extracted {len(all_frames)} frames")
@@ -764,177 +682,67 @@ def handle_ppt_command(args):
             duplicates_removed = len(all_frames) - len(unique_frames)
             print(f"✓ Phase 2: Deduplication - Removed {duplicates_removed} duplicates, {len(unique_frames)} unique frames remain")
             
-            # Phase 3: Determine workflow based on --roi flag
-            manual_roi = getattr(args, "roi", None)
+            # Phase 3: OCR on full frames
+            print(f"→ Phase 3: Running OCR on {len(unique_frames)} unique frames...")
+            slides_data = []
             
-            if manual_roi == "":
-                # --roi with no value: skip ROI detection, OCR full frames
-                print(f"✓ Phase 3: Using full-frame OCR (--roi flag provided)")
-                slides_data = []
+            for frame_idx, frame_data in enumerate(unique_frames, 1):
+                frame_path = frame_data.get('frame_path')
+                timestamp = frame_data.get('timestamp', '')
                 
-                for frame_data in unique_frames:
-                    frame_path = frame_data.get('frame_path')
-                    timestamp = frame_data.get('timestamp', '')
-                    
-                    if not frame_path or not os.path.exists(frame_path):
-                        continue
-                    
-                    try:
-                        ocr_result = ocr_slide_image(
-                            frame_path, output_dir=output_dir, logger=logger, verbose=args.verbose
-                        )
-                        
-                        slide_content = ocr_result.get("text", "")
-                        image_data = None
-                        
-                        # Embed image if OCR text is short/unreliable
-                        if (
-                            not slide_content
-                            or len(slide_content.strip()) < 15
-                            or ocr_result.get("failed", False)
-                        ):
-                            try:
-                                with open(frame_path, "rb") as img_file:
-                                    image_data = img_file.read()
-                            except Exception as e:
-                                if args.verbose and logger:
-                                    logger.warning(f"Failed to read image for embedding: {e}")
-                        
-                        slides_data.append({
-                            "timestamp": timestamp,
-                            "content": slide_content,
-                            "image_data": image_data,
-                            "frame_path": frame_path,
-                        })
-                        
-                        if args.verbose and logger:
-                            logger.debug(f"OCR completed for frame at {timestamp}")
-                            
-                    except Exception as e:
-                        if args.verbose and logger:
-                            logger.warning(f"Error during OCR for frame at {timestamp}: {e}")
-                        continue
+                if not frame_path or not os.path.exists(frame_path):
+                    continue
                 
-                print(f"✓ Phase 3: OCR completed on {len(slides_data)} full frames")
-                
-            elif manual_roi is not None and manual_roi != "":
-                # Custom ROI: parse and apply to all frames
                 try:
-                    roi_parts = manual_roi.split(",")
-                    if len(roi_parts) != 4:
-                        print(f"Error: Invalid ROI format. Use 'x0,y0,x1,y1' (got: {manual_roi})")
-                        sys.exit(1)
-                    roi_coords = tuple(int(x.strip()) for x in roi_parts)
-                    print(f"✓ Phase 3: Using custom ROI: {roi_coords}")
-                    
-                    # Apply ROI to all frames
-                    for frame in unique_frames:
-                        frame['roi_coords'] = roi_coords
-                    
-                    # Crop and OCR
-                    slides_data = _process_slides_with_roi(
-                        unique_frames, output_dir, base_name, logger, args.verbose
+                    ocr_result = ocr_slide_image(
+                        frame_path, output_dir=output_dir, logger=logger, verbose=args.verbose
                     )
-                    print(f"✓ Phase 3: OCR completed on {len(slides_data)} slides with custom ROI")
                     
-                except ValueError as e:
-                    print(f"Error: Could not parse ROI coordinates: {e}")
-                    sys.exit(1)
+                    slide_content = ocr_result.get("text", "").strip()
+                    image_data = None
                     
-            else:
-                # Auto-detect: per-frame SAM2 segmentation on each unique frame
-                print(f"✓ Phase 3: Per-frame SAM2 segmentation on {len(unique_frames)} unique frames...")
-                from wenbi.video_slides import detect_slide_roi_with_yolo
-                
-                frames_with_roi = []
-                frames_full_frame = []
-                
-                for frame_data in unique_frames:
-                    frame_path = frame_data.get('frame_path')
-                    if frame_path and os.path.exists(frame_path):
-                        roi = detect_slide_roi_with_yolo(frame_path, logger=logger, verbose=args.verbose)
-                        if roi:
-                            # Speaker detected and removed, use cropped ROI
-                            frame_data['roi_coords'] = roi
-                            frames_with_roi.append(frame_data)
-                        else:
-                            # No speaker detected in corners, use full-frame fallback
-                            frames_full_frame.append(frame_data)
-                
-                # Process frames with detected ROI (cropped)
-                slides_data = []
-                if frames_with_roi:
-                    slides_data = _process_slides_with_roi(
-                        frames_with_roi, output_dir, base_name, logger, args.verbose
-                    )
-                    print(f"  Processed {len(slides_data)} slides with per-frame SAM2 ROI")
-                
-                # Process frames without speaker detection (full-frame fallback)
-                if frames_full_frame:
-                    for frame_data in frames_full_frame:
-                        frame_path = frame_data.get('frame_path')
-                        timestamp = frame_data.get('timestamp', '')
-                        
-                        if not frame_path or not os.path.exists(frame_path):
-                            continue
-                        
+                    # Embed image if OCR failed to extract text
+                    if not slide_content or ocr_result.get("failed", False):
                         try:
-                            ocr_result = ocr_slide_image(
-                                frame_path, output_dir=output_dir, logger=logger, verbose=args.verbose
-                            )
-                            
-                            slide_content = ocr_result.get("text", "")
-                            image_data = None
-                            
-                            # Embed image if OCR text is short/unreliable
-                            if (
-                                not slide_content
-                                or len(slide_content.strip()) < 15
-                                or ocr_result.get("failed", False)
-                            ):
-                                try:
-                                    with open(frame_path, "rb") as img_file:
-                                        image_data = img_file.read()
-                                except Exception as e:
-                                    if args.verbose and logger:
-                                        logger.warning(f"Failed to read image for embedding: {e}")
-                            
-                            slides_data.append({
-                                "timestamp": timestamp,
-                                "content": slide_content,
-                                "image_data": image_data,
-                                "frame_path": frame_path,
-                            })
-                            
-                            if args.verbose and logger:
-                                logger.debug(f"OCR completed for full-frame at {timestamp}")
-                                
+                            with open(frame_path, "rb") as img_file:
+                                image_data = img_file.read()
+                            if args.verbose:
+                                logger.debug(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: OCR failed, embedded image ({len(image_data)} bytes)")
+                            else:
+                                print(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: No text extracted (image embedded)")
                         except Exception as e:
-                            if args.verbose and logger:
-                                logger.warning(f"Error during OCR for full-frame at {timestamp}: {e}")
-                            continue
+                            if args.verbose:
+                                logger.warning(f"Failed to read image for embedding at {timestamp}: {e}")
+                            print(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: Error embedding image")
+                    else:
+                        text_preview = slide_content[:50].replace('\n', ' ') if slide_content else "(empty)"
+                        if args.verbose:
+                            logger.debug(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: OCR succeeded ({len(slide_content)} chars)")
+                        else:
+                            print(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: {text_preview}...")
                     
-                    print(f"  Processed {len(frames_full_frame)} slides with full-frame fallback")
-                
-                print(f"✓ Phase 3: OCR completed on {len(slides_data)} total slides")
-
-        # cleanup trimmed clip directory if created
-        if "trimmed_temp_dir" in locals() and trimmed_temp_dir:
-            try:
-                shutil.rmtree(trimmed_temp_dir)
-            except Exception:
-                pass
+                    slides_data.append({
+                        "timestamp": timestamp,
+                        "content": slide_content,
+                        "image_data": image_data,
+                        "frame_path": frame_path,
+                    })
+                        
+                except Exception as e:
+                    if args.verbose:
+                        logger.warning(f"Error during OCR for frame at {timestamp}: {e}")
+                    else:
+                        print(f"  Frame {frame_idx}/{len(unique_frames)} at {timestamp}: OCR error - {str(e)[:50]}")
+                    continue
+            
+            print(f"✓ Phase 3: OCR completed on {len(slides_data)} frames")
 
         if not slides_data:
-            print(
-                "Warning: No slides extracted from video. Proceeding with speech transcription only."
-            )
+            print("⚠ Warning: No slides extracted from video. Proceeding with speech transcription only.")
             slides_file = None
         else:
             if args.verbose:
-                logger.debug(
-                    f"Extracted {len(slides_data)} slides. Saving to _slide.md."
-                )
+                logger.debug(f"Extracted {len(slides_data)} slides. Saving to markdown.")
             slides_file = save_slides_to_markdown(
                 slides_data, output_dir, base_name, logger, args.verbose
             )
@@ -1021,13 +829,13 @@ def handle_ppt_command(args):
             with open(combined_file, "w", encoding="utf-8") as f:
                 f.write(combined_content)
 
-            print("PPT processing completed successfully!")
-            print(f"Slides file: {slides_file}")
-            print(f"Speech file: {speech_file}")
-            print(f"Combined file: {combined_file}")
+            print("✓ PPT processing completed successfully!")
+            print(f"  Slides file: {slides_file}")
+            print(f"  Speech file: {speech_file}")
+            print(f"  Combined file: {combined_file}")
         else:
-            print("PPT processing completed (only speech transcription).")
-            print(f"Speech file: {speech_file}")
+            print("✓ PPT processing completed (speech transcription only).")
+            print(f"  Speech file: {speech_file}")
 
     except Exception as e:
         print(f"Error during PPT processing: {e}")
@@ -1050,57 +858,40 @@ def save_slides_to_markdown(
     with open(slides_file, "w", encoding="utf-8") as f:
         f.write("# Extracted Slides\n\n")
         
-        for slide in slides_data:
+        for idx, slide in enumerate(slides_data, 1):
             f.write(f"## Slide at {slide['timestamp']}\n\n")
             
             # Get OCR content
-            ocr_content = slide.get("content", "")
+            ocr_content = slide.get("content", "").strip()
+            image_data = slide.get("image_data")
             
-            if ocr_content and len(ocr_content.strip()) > 10:
-                # Extract Picture references from OCR content
-                # Pattern: Picture_N.jpeg or ![...](Picture_N.jpeg)
-                picture_pattern = r'Picture_\d+\.(?:jpeg|png|jpg)'
-                picture_refs = set(re.findall(picture_pattern, ocr_content))
-                
-                # Replace Picture references with base64 embedded versions
-                for picture_ref in picture_refs:
-                    picture_path = os.path.join(output_dir, picture_ref)
+            if ocr_content:
+                # OCR succeeded, write the text
+                f.write(f"{ocr_content}\n\n")
+            
+            if image_data:
+                # Embed image if OCR failed or image provided
+                try:
+                    # Encode image to base64
+                    img_b64 = base64.b64encode(image_data).decode()
                     
-                    if os.path.exists(picture_path):
-                        try:
-                            with open(picture_path, "rb") as img_file:
-                                img_data = img_file.read()
-                            
-                            # Determine MIME type
-                            ext = os.path.splitext(picture_ref)[1].lower()
-                            mime_type = "image/jpeg" if ext in [".jpeg", ".jpg"] else "image/png"
-                            
-                            # Encode to base64
-                            img_b64 = base64.b64encode(img_data).decode()
-                            base64_uri = f"data:{mime_type};base64,{img_b64}"
-                            
-                            # Replace picture reference with embedded base64 in markdown
-                            # Replace both markdown image syntax and plain references
-                            ocr_content = re.sub(
-                                rf'!\[.*?\]\({re.escape(picture_ref)}\)',
-                                f'![{picture_ref}]({base64_uri})',
-                                ocr_content
-                            )
-                            ocr_content = ocr_content.replace(picture_ref, f'![{picture_ref}]({base64_uri})')
-                            
-                            if verbose and logger:
-                                logger.debug(f"Embedded {picture_ref} as base64 for slide at {slide['timestamp']}")
-                        
-                        except Exception as e:
-                            if verbose and logger:
-                                logger.warning(f"Could not embed {picture_ref}: {e}")
-                    else:
-                        if verbose and logger:
-                            logger.warning(f"Picture file not found: {picture_path}")
+                    # Determine MIME type (default to PNG since frames are PNG)
+                    mime_type = "image/png"
+                    
+                    # Embed as base64 image
+                    base64_uri = f"data:{mime_type};base64,{img_b64}"
+                    f.write(f"![Slide {idx}]({base64_uri})\n\n")
+                    
+                    if verbose and logger:
+                        logger.debug(f"Embedded image for slide at {slide['timestamp']}")
                 
-                # Write OCR content (with embedded images)
-                f.write(f"> {ocr_content}\n\n")
-            else:
+                except Exception as e:
+                    if verbose and logger:
+                        logger.warning(f"Could not embed image for slide at {slide['timestamp']}: {e}")
+                    f.write(f"> Image embedding failed: {e}\n\n")
+            
+            # If no content and no image, note it
+            if not ocr_content and not image_data:
                 f.write("> No content available for this slide.\n\n")
 
     if verbose and logger:
