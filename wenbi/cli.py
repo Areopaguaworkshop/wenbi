@@ -1345,26 +1345,38 @@ def insert_slides_into_speech(speech_file, slides_file, logger=None, verbose=Fal
         end_time = speech_sections[i + 1]
         text_content = speech_sections[i + 2]
 
-        # Find and insert slides that start before or within this speech section's end time
+        # Convert speech section end time to seconds
+        try:
+            end_seconds = parse_time_to_seconds(end_time)
+        except Exception as e:
+            if logger:
+                logger.warning(
+                    f"Could not parse speech section end time {end_time}. Error: {e}"
+                )
+            continue
+
+        # Find and insert slides that occur before or at this speech section's end time
         while current_slide_index < len(slides_data):
             slide_timestamp_str = slides_data[current_slide_index]["timestamp"]
 
-            # Convert timestamps to seconds for comparison
+            # Convert slide timestamp to seconds for comparison
             try:
                 slide_seconds = parse_time_to_seconds(slide_timestamp_str)
-                end_seconds = parse_time_to_seconds(end_time)
             except Exception as e:
                 if logger:
                     logger.warning(
-                        f"Could not parse time: {slide_timestamp_str} or {end_time}. Error: {e}"
+                        f"Could not parse slide timestamp: {slide_timestamp_str}. Error: {e}"
                     )
-                break
+                current_slide_index += 1
+                continue
 
+            # If slide timestamp is before or at the end of this speech section,
+            # insert it before the speech section
             if slide_seconds <= end_seconds:
                 slide_info = slides_data[current_slide_index]
                 if verbose:
                     logger.debug(
-                        f"Inserting slide at {slide_info['timestamp']} into section ending at {end_time}"
+                        f"Inserting slide at {slide_info['timestamp']} before section [{start_time}-{end_time}]"
                     )
 
                 combined_content.append(
@@ -1373,11 +1385,11 @@ def insert_slides_into_speech(speech_file, slides_file, logger=None, verbose=Fal
                 combined_content.append(slide_info["content_md"])
                 current_slide_index += 1
             else:
-                # This slide belongs to a later section
+                # Slide is after this section's end time, will be inserted in a later section
                 break
 
-        # Add the original speech section
-        combined_content.append(f"[{start_time}-{end_time}]")
+        # Add the original speech section after slides
+        combined_content.append(f"\n\n[{start_time}-{end_time}]")
         combined_content.append(text_content)
 
     if verbose:
