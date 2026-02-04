@@ -579,8 +579,512 @@ def is_markdown_file(file_path):
     return ext in [".md", ".markdown"]
 
 
+# ============================================================================
+# PPT WORKFLOW UTILITY FUNCTIONS
+# ============================================================================
+
+def image_to_base64(image_path):
+    """Convert image file to base64 string"""
+    import base64
+    try:
+        with open(image_path, "rb") as f:
+            img_data = f.read()
+        return base64.b64encode(img_data).decode("utf-8")
+    except Exception as e:
+        return None
+
+
+def extract_and_deduplicate_frames(video_path, start_time, end_time, frame_interval,
+                                   ssim_threshold, hist_threshold, output_dir,
+                                   logger, verbose):
+    """Extract and deduplicate frames from video."""
+    from wenbi.video_slides import extract_all_frames_from_video, deduplicate_slides_by_image
+
+    if verbose:
+        logger.debug(f"Extracting frames with interval {frame_interval}s...")
+
+    all_frames = extract_all_frames_from_video(
+        video_path=video_path,
+        output_dir=output_dir,
+        start_time=start_time or "00:00:00",
+        end_time=end_time or None,
+        frame_interval=frame_interval,
+        logger=logger,
+        verbose=verbose
+    )
+
+    if not all_frames:
+        print(f"Error: No frames extracted from {video_path}")
+        sys.exit(1)
+
+    if verbose:
+        logger.debug(f"Extracted {len(all_frames)} frames")
+
+    if verbose:
+        logger.debug("Deduplicating frames...")
+
+    deduplicated = deduplicate_slides_by_image(
+        all_frames,
+        ssim_threshold=ssim_threshold,
+        hist_threshold=hist_threshold,
+        logger=logger,
+        verbose=verbose
+    )
+
+    removed = len(all_frames) - len(deduplicated)
+    if verbose:
+        logger.debug(f"Removed {removed} duplicates, {len(deduplicated)} unique frames remain")
+
+    if not deduplicated:
+        print("Error: No frames after deduplication")
+        sys.exit(1)
+
+    return deduplicated
+
+
+def run_marker_pdf_on_image(image_path, output_dir, verbose=False, logger=None):
+    """
+    Run marker_single shell command on image file.
+    Returns dict with text, base64_images, and success status.
+    """
+    import subprocess
+    import base64
+    import shutil
+
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    if not os.path.exists(image_path):
+        return {
+            "text": "",
+            "base64_images": {},
+            "success": False,
+            "error": f"Image not found: {image_path}"
+        }
+
+    # Create temp output directory for marker
+    temp_marker_dir = os.path.join(output_dir, f"marker_temp_{os.getpid()}")
+    os.makedirs(temp_marker_dir, exist_ok=True)
+
+    try:
+        # Run marker_single command
+        if verbose:
+            logger.debug(f"Running marker_single on: {os.path.basename(image_path)}")
+
+        cmd = [
+            "marker_single",
+            image_path,
+            "--output_format", "markdown",
+            "--output_dir", temp_marker_dir
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+        if result.returncode != 0:
+            error_msg = result.stderr or "marker_single failed"
+            if verbose:
+                logger.warning(f"marker_single error: {error_msg}")
+            return {
+                "text": "",
+                "base64_images": {},
+                "success": False,
+                "error": error_msg
+            }
+
+        # Read generated markdown file
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        md_file = os.path.join(temp_marker_dir, f"{base_name}.md")
+
+        if not os.path.exists(md_file):
+            if verbose:
+                logger.warning(f"Marker output file not found: {md_file}")
+            return {
+                "text": "",
+                "base64_images": {},
+                "success": False,
+                "error": "Marker did not generate markdown output"
+            }
+
+        # Read markdown text
+        with open(md_file, "r", encoding="utf-8") as f:
+            markdown_text = f.read()
+
+        # Look for extracted images in temp directory
+        base64_images = {}
+        for filename in os.listdir(temp_marker_dir):
+            if filename.endswith((".png", ".jpg", ".jpeg", ".gif")):
+                img_path = os.path.join(temp_marker_dir, filename)
+                try:
+                    with open(img_path, "rb") as f:
+                        img_data = f.read()
+                    b64_str = base64.b64encode(img_data).decode("utf-8")
+                    base64_images[filename] = b64_str
+
+                    if verbose:
+                        logger.debug(f"Encoded image to base64: {filename}")
+                except Exception as e:
+                    logger.warning(f"Failed to encode image {filename}: {e}")
+
+        if verbose:
+            logger.debug(f"Marker OCR: {len(base64_images)} images extracted")
+
+        return {
+            "text": markdown_text,
+            "base64_images": base64_images,
+            "success": True
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "text": "",
+            "base64_images": {},
+            "success": False,
+            "error": "marker_single timeout (>5 min)"
+        }
+
+    except Exception as e:
+        logger.error(f"Error running marker_single: {e}")
+        return {
+            "text": "",
+            "base64_images": {},
+            "success": False,
+            "error": str(e)
+        }
+
+    finally:
+        # Clean up temp directory
+        try:
+            shutil.rmtree(temp_marker_dir)
+        except:
+            pass
+
+
+def embed_frames_as_base64(frames_with_timestamps, output_dir, base_name, logger, verbose):
+    """Generate markdown with frames embedded as base64."""
+    content = []
+
+    for frame_dict in frames_with_timestamps:
+        timestamp = frame_dict["timestamp"]
+        frame_path = frame_dict["frame_path"]
+
+        try:
+            b64 = image_to_base64(frame_path)
+            if not b64:
+                logger.warning(f"Failed to encode {timestamp}")
+                continue
+
+            section = f"\n### **{timestamp}**\n"
+            section += f'<img src="data:image/png;base64,{b64}" />\n'
+
+            content.append(section)
+
+            if verbose:
+                logger.debug(f"Encoded frame {timestamp} to base64")
+
+        except Exception as e:
+            logger.warning(f"Failed to encode {timestamp}: {e}")
+
+    md_path = os.path.join(output_dir, f"{base_name}_slides.md")
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write("".join(content))
+
+    if verbose:
+        logger.debug(f"Generated base64 markdown: {md_path}")
+
+    return md_path
+
+
+def clean_combined_markdown(combine_md_path, output_dir, base_name, logger, verbose):
+    """
+    Remove timestamps and image file references, keep base64 images.
+    """
+    if verbose:
+        logger.debug("Cleaning combined markdown...")
+
+    with open(combine_md_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Remove timestamp headers (### **HH:MM:SS**)
+    import re
+    content = re.sub(r'\n### \*\*\d{2}:\d{2}:\d{2}\*\*\n', '\n', content)
+
+    # Remove image file references ![slide](/path/to/image.png)
+    # but keep <img src="data:image/png;base64,..."/>
+    content = re.sub(r'!\[.*?\]\([^)]*\.png\)', '', content)
+
+    clean_path = os.path.join(output_dir, f"{base_name}_combine_clean.md")
+    with open(clean_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    if verbose:
+        logger.debug(f"Cleaned markdown: {clean_path}")
+
+    return clean_path
+
+
 def handle_ppt_command(args):
-    """Handle ppt subcommand - extract slides from video and combine with speech transcription"""
+    """Handle ppt subcommand - main entry point for all 3 PPT workflow methods"""
+    import subprocess
+
+    logger = setup_logging(args.verbose)
+
+    if args.verbose:
+        logger.debug("Starting PPT workflow")
+        logger.debug(f"Input: {args.input}")
+
+    # Validate input
+    if not args.input:
+        print("Error: Video file or URL is required")
+        sys.exit(1)
+
+    output_dir = args.output_dir or os.getcwd()
+    os.makedirs(output_dir, exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(args.input))[0]
+    is_url = args.input.startswith(("http://", "https://", "www."))
+
+    # Input validation for local files
+    if not is_url:
+        from wenbi.video_slides import validate_video_input
+
+        if not validate_video_input(args.input, logger, args.verbose):
+            print(f"Error: Invalid video file: {args.input}")
+            sys.exit(1)
+
+    video_path = args.input
+
+    # Download video if URL
+    if is_url:
+        if args.verbose:
+            logger.debug("Downloading video from URL...")
+
+        from wenbi.utils import download_audio
+
+        try:
+            download_result = download_audio(
+                args.input, output_dir=output_dir, verbose=args.verbose
+            )
+            if download_result:
+                video_path = download_result
+            else:
+                print("Error: Failed to download video from URL")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error downloading video: {e}")
+            sys.exit(1)
+
+        if args.verbose:
+            logger.debug(f"Video downloaded to: {video_path}")
+
+    # COMMON FOUNDATION: Extract frames + deduplicate
+    if args.verbose:
+        logger.debug("Step 1: Extracting and deduplicating frames...")
+
+    deduplicated_frames = extract_and_deduplicate_frames(
+        video_path=video_path,
+        start_time=args.start_time,
+        end_time=args.end_time,
+        frame_interval=args.frame_interval,
+        ssim_threshold=args.ssim_threshold,
+        hist_threshold=args.hist_threshold,
+        output_dir=output_dir,
+        logger=logger,
+        verbose=args.verbose
+    )
+
+    # ROUTE TO METHOD
+    try:
+        if args.ppt:
+            # TYPE 3: PPT METHOD
+            if args.verbose:
+                logger.debug("Routing to TYPE 3: PPT Method")
+            from wenbi.ppt_slide import execute_ppt_method
+
+            combine_md, combine_clean_md = execute_ppt_method(
+                video_path=video_path,
+                deduplicated_frames=deduplicated_frames,
+                ppt_path=args.ppt,
+                output_dir=output_dir,
+                no_ocr=args.no_ocr,
+                no_clean=args.no_clean,
+                base_name=base_name,
+                cite_timestamps=args.cite_timestamps,
+                llm=args.llm,
+                chunk_length=args.chunk_length,
+                max_tokens=args.max_tokens,
+                timeout=args.timeout,
+                temperature=args.temperature,
+                lang=args.lang,
+                transcribe_model=args.transcribe_model,
+                multi_language=args.multi_language,
+                transcribe_lang=args.transcribe_lang,
+                logger=logger,
+                verbose=args.verbose
+            )
+
+        elif args.cropped_slide is not None:
+            # TYPE 2: CROPPED-SLIDE METHOD
+            if args.verbose:
+                logger.debug("Routing to TYPE 2: CROPPED-SLIDE Method")
+            from wenbi.cropped_slide import execute_cropped_slide_method
+
+            combine_md, combine_clean_md = execute_cropped_slide_method(
+                video_path=video_path,
+                deduplicated_frames=deduplicated_frames,
+                roi_string=args.cropped_slide if args.cropped_slide != "auto" else None,
+                output_dir=output_dir,
+                no_ocr=args.no_ocr,
+                no_clean=args.no_clean,
+                base_name=base_name,
+                cite_timestamps=args.cite_timestamps,
+                llm=args.llm,
+                chunk_length=args.chunk_length,
+                max_tokens=args.max_tokens,
+                timeout=args.timeout,
+                temperature=args.temperature,
+                lang=args.lang,
+                transcribe_model=args.transcribe_model,
+                multi_language=args.multi_language,
+                transcribe_lang=args.transcribe_lang,
+                logger=logger,
+                verbose=args.verbose
+            )
+
+        else:
+            # TYPE 1: FRAME METHOD (existing, refactored)
+            if args.verbose:
+                logger.debug("Routing to TYPE 1: FRAME Method")
+
+            if args.no_ocr:
+                if args.verbose:
+                    logger.debug("--no-ocr: Embedding frames as base64...")
+
+                slides_md = embed_frames_as_base64(
+                    deduplicated_frames,
+                    output_dir,
+                    base_name,
+                    logger,
+                    args.verbose
+                )
+            else:
+                if args.verbose:
+                    logger.debug("Step 2: Running OCR on frames...")
+
+                # OCR each frame
+                markdown_sections = []
+
+                for idx, frame_dict in enumerate(deduplicated_frames, 1):
+                    timestamp = frame_dict["timestamp"]
+                    frame_path = frame_dict["frame_path"]
+
+                    if args.verbose:
+                        logger.debug(f"OCR frame {idx}/{len(deduplicated_frames)}: {timestamp}")
+
+                    ocr_result = run_marker_pdf_on_image(
+                        frame_path, output_dir, args.verbose, logger
+                    )
+
+                    section = f"\n### **{timestamp}**\n"
+
+                    if ocr_result["success"]:
+                        section += ocr_result["text"]
+
+                        # Add base64 images if any
+                        for filename, b64 in ocr_result["base64_images"].items():
+                            section += f'\n<img src="data:image/png;base64,{b64}" />\n'
+                    else:
+                        # OCR failed, embed as base64
+                        if args.verbose:
+                            logger.warning(f"OCR failed for {timestamp}, using base64")
+
+                        b64 = image_to_base64(frame_path)
+                        if b64:
+                            section += f'<img src="data:image/png;base64,{b64}" />\n'
+
+                    markdown_sections.append(section)
+
+                slides_md = os.path.join(output_dir, f"{base_name}_slides.md")
+                with open(slides_md, "w", encoding="utf-8") as f:
+                    f.write("".join(markdown_sections))
+
+                if args.verbose:
+                    logger.debug(f"OCR completed: {slides_md}")
+
+            # Step 3: Rewrite audio
+            if args.verbose:
+                logger.debug("Step 3: Processing audio...")
+
+            params = {
+                "output_dir": output_dir,
+                "llm": args.llm,
+                "chunk_length": args.chunk_length,
+                "max_tokens": args.max_tokens,
+                "timeout": args.timeout,
+                "temperature": args.temperature,
+                "lang": args.lang,
+                "transcribe_model": args.transcribe_model,
+                "multi_language": args.multi_language,
+                "transcribe_lang": args.transcribe_lang,
+                "cite_timestamps": args.cite_timestamps,
+                "verbose": args.verbose,
+                "subcommand": "rewrite"
+            }
+
+            result = process_input(
+                file_path=video_path,
+                url="",
+                **params
+            )
+
+            audio_markdown = result[0]
+            if args.verbose:
+                logger.debug(f"Audio processing completed")
+
+            # Step 4: Combine
+            if args.verbose:
+                logger.debug("Step 4: Combining slide and audio markdown...")
+
+            with open(slides_md, "r", encoding="utf-8") as f:
+                slides_content = f.read()
+
+            combined_markdown = combine_speech_and_slides(
+                speech_markdown=audio_markdown,
+                slides_markdown=slides_content,
+                logger=logger,
+                verbose=args.verbose
+            )
+
+            combine_md = os.path.join(output_dir, f"{base_name}_combine.md")
+            with open(combine_md, "w", encoding="utf-8") as f:
+                f.write(combined_markdown)
+
+            if args.verbose:
+                logger.debug(f"Combined markdown: {combine_md}")
+
+            # Step 5: Clean (if not --no-clean)
+            if args.no_clean:
+                combine_clean_md = None
+                if args.verbose:
+                    logger.debug("--no-clean: Skipping clean phase")
+            else:
+                combine_clean_md = clean_combined_markdown(
+                    combine_md, output_dir, base_name, logger, args.verbose
+                )
+
+        # Print results
+        print("✓ PPT processing completed!")
+        print(f"  Combined: {combine_md}")
+        if combine_clean_md:
+            print(f"  Cleaned: {combine_clean_md}")
+
+    except Exception as e:
+        print(f"Error during PPT processing: {e}")
+        if args.verbose:
+            logger.exception("Detailed error trace:")
+        sys.exit(1)
+
+
+def _old_handle_ppt_command_backup(args):
+    """Old implementation kept for reference during migration"""
     import subprocess
     import sys
 
@@ -639,8 +1143,8 @@ def handle_ppt_command(args):
                 logger.debug(f"Video downloaded to: {video_path}")
 
         # Configure time range for slide extraction
-        slides_start = getattr(args, "slides_start_time", "00:00:10") or "00:00:10"
-        slides_end = getattr(args, "slides_end_time", "01:00:00") or "01:00:00"
+        slides_start = getattr(args, "start_time", "00:00:10") or "00:00:10"
+        slides_end = getattr(args, "end_time", "01:00:00") or "01:00:00"
         video_for_slides = video_path
 
         if args.verbose:
@@ -1383,85 +1887,6 @@ def parse_time_to_seconds(time_str):
 
     return total_seconds
 
-    # For video slides mode (new default behavior)
-    if getattr(args, "video_mode", True) and not getattr(args, "slides_mode", False):
-        from wenbi.video_slides import process_video_slides, validate_video_input
-
-        if args.verbose:
-            logger.debug("Video slides mode enabled")
-
-        # Validate video input
-        if not args.input:
-            print("Error: Video file is required for video slides mode")
-            sys.exit(1)
-
-        is_url = args.input.startswith(("http://", "https://", "www."))
-        if is_url:
-            print(
-                "Error: Video URLs not supported yet for video slides mode. Please use local video file."
-            )
-            sys.exit(1)
-
-        if not validate_video_input(args.input, logger, args.verbose):
-            print(f"Error: Invalid video file: {args.input}")
-            sys.exit(1)
-
-        # Prepare parameters
-        output_dir = args.output_dir or os.getcwd()
-        roi_coords = None
-        if getattr(args, "roi", ""):
-            from wenbi.video_slides import detect_video_resolution
-
-            try:
-                parts = [p.strip() for p in str(args.roi).split(",")]
-                if len(parts) == 4:
-                    width, height = detect_video_resolution(args.input)
-                    coords = []
-                    for i, p in enumerate(parts):
-                        if p == "":
-                            raise ValueError("Empty ROI value")
-                        if "." in p:
-                            v = float(p)
-                            if 0.0 <= v <= 1.0:
-                                coords.append(
-                                    int(v * (width if i % 2 == 0 else height))
-                                )
-                            else:
-                                coords.append(int(v))
-                        else:
-                            coords.append(int(p))
-                    if len(coords) == 4:
-                        roi_coords = (coords[0], coords[1], coords[2], coords[3])
-            except Exception:
-                roi_coords = None
-
-        # Parse time range (default to first hour)
-        start_time = getattr(args, "slides_start_time", "00:00:00") or "00:00:00"
-        end_time = getattr(args, "slides_end_time", "01:00:00")
-
-        try:
-            # Process video slides with time range
-            output_file = process_video_workflow(
-                input_path=args.input,
-                output_dir=output_dir,
-                cite_timestamps=args.cite_timestamps,
-                start_time=start_time,
-                end_time=end_time,
-                logger=logger,
-                verbose=args.verbose,
-            )
-
-            print("Video slides processing completed successfully!")
-            print(f"Output file: {output_file}")
-
-        except Exception as e:
-            print(f"Error processing video slides: {e}")
-            if args.verbose:
-                logger.exception("Detailed error trace:")
-            sys.exit(1)
-
-        return
-
     # Original PPT functionality (speech + slides)
     if args.verbose:
         logger.debug(f"Speech input: {args.input}")
@@ -1802,6 +2227,32 @@ def main():
             type=float,
             default=0.15,
             help="Histogram correlation threshold for image deduplication pre-filter, 0.0-1.0 (default: 0.15).",
+        )
+        ppt_parser.add_argument(
+            "--cropped-slide",
+            nargs="?",
+            const="auto",
+            default=None,
+            help="Enable cropped slide method. No value = auto-detect ROI with RTDETR, "
+                 "or provide manual ROI coordinates as 'x0,y0,x1,y1'",
+        )
+        ppt_parser.add_argument(
+            "--ppt",
+            type=str,
+            default="",
+            help="Path to PPT or PDF file for PPT method",
+        )
+        ppt_parser.add_argument(
+            "--no-ocr",
+            action="store_true",
+            default=False,
+            help="Skip OCR, embed slide images as base64 instead",
+        )
+        ppt_parser.add_argument(
+            "--no-clean",
+            action="store_true",
+            default=False,
+            help="Keep timestamps and image references in final output",
         )
         ppt_parser.set_defaults(func=handle_ppt_command)
 
