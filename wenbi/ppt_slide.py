@@ -1,6 +1,6 @@
 """
 PPT Method Implementation (Type 3)
-Load/Convert PDF/PPT → Extract Timestamps → OCR → Combine with Audio
+Load/Convert PDF/PPT/Images → Extract Timestamps → OCR → Combine with Audio
 """
 
 import os
@@ -11,8 +11,9 @@ from typing import List, Tuple
 
 def load_and_convert_pdf(ppt_pdf_path, output_dir, logger, verbose):
     """
-    Load PPT or PDF file. Convert PPT to PDF if needed.
-    Returns path to PDF file.
+    Load PPT, PDF, or image file. Convert PPT to PDF if needed.
+    For images, create a simple workflow to process them as slides.
+    Returns path to PDF file or the original path for images.
     """
     
     if not os.path.exists(ppt_pdf_path):
@@ -83,9 +84,69 @@ def load_and_convert_pdf(ppt_pdf_path, output_dir, logger, verbose):
         logger.debug("PDF file detected, using directly")
         return ppt_pdf_path
     
+    elif file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
+        logger.debug(f"Image file detected: {file_ext}")
+        # For image inputs, return the image path directly
+        return ppt_pdf_path
+    
+    elif file_ext == ".odp":
+        logger.debug("OpenDocument Presentation (.odp) file detected")
+        return ppt_pdf_path  # Will try to process as-is for now
+    
     else:
-        print(f"Error: Unsupported file format: {file_ext} (expected .pdf or .pptx)")
+        print(f"Error: Unsupported file format: {file_ext} (expected .pdf, .pptx, .png, .jpg, .jpeg, .bmp, .tiff, .webp, .odp)")
         raise SystemExit(1)
+
+
+def process_images_as_slides(ppt_path, deduplicated_frames, output_dir, no_ocr, base_name, cite_timestamps, logger, verbose):
+    """
+    Process image files directly as slides.
+    Map each image to timestamps from deduplicated frames.
+    """
+    from wenbi.cli import image_to_base64, run_marker_pdf_on_image
+    
+    if verbose:
+        logger.debug(f"=== Processing image input: {ppt_path} ===")
+    
+    markdown_sections = []
+    
+    for frame_idx, frame_data in enumerate(deduplicated_frames):
+        timestamp = frame_data["timestamp"]
+        
+        if verbose:
+            logger.debug(f"Processing timestamp {frame_idx + 1}/{len(deduplicated_frames)}: {timestamp}")
+        
+        section = f"\n### **{timestamp}**\n"
+        
+        if no_ocr:
+            # Embed image as base64
+            b64 = image_to_base64(ppt_path)
+            if b64:
+                section += f'<img src="data:image/png;base64,{b64}" />\n'
+        else:
+            # Run OCR on image
+            ocr_result = run_marker_pdf_on_image(
+                ppt_path, output_dir, verbose, logger
+            )
+            
+            if ocr_result["success"]:
+                section += ocr_result["text"]
+                
+                # Add base64 images if any
+                for filename, b64 in ocr_result["base64_images"].items():
+                    section += f'\n<img src="data:image/png;base64,{b64}" />\n'
+            else:
+                # OCR failed, fallback to base64
+                if verbose:
+                    logger.warning(f"OCR failed for {timestamp}, using base64")
+                
+                b64 = image_to_base64(ppt_path)
+                if b64:
+                    section += f'<img src="data:image/png;base64,{b64}" />\n'
+        
+        markdown_sections.append(section)
+    
+    return markdown_sections
 
 
 def extract_timestamps_for_pdf_pages(deduplicated_frames):
@@ -100,7 +161,16 @@ def extract_timestamps_for_pdf_pages(deduplicated_frames):
 def validate_pdf_frame_mapping(pdf_path, timestamps, logger):
     """
     Validate that number of PDF pages matches number of timestamps.
+    For images, skip validation.
     """
+    file_ext = os.path.splitext(pdf_path)[1].lower()
+    
+    if file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
+        # Skip validation for image inputs
+        if logger:
+            logger.debug(f"Skipping PDF validation for image input: {file_ext}")
+        return
+    
     try:
         import PyPDF2
         
@@ -118,7 +188,8 @@ def validate_pdf_frame_mapping(pdf_path, timestamps, logger):
             )
             raise SystemExit(1)
         
-        logger.debug(f"Mapping validated: {num_pages} pages ↔ {num_timestamps} timestamps")
+        if logger:
+            logger.debug(f"Mapping validated: {num_pages} pages ↔ {num_timestamps} timestamps")
     
     except ImportError:
         print("Error: PyPDF2 not installed. Run: rye add PyPDF2")
@@ -172,90 +243,107 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     if verbose:
         logger.debug("=== TYPE 3: PPT Method ===")
     
-    # Step 1: Load and convert PDF/PPT
-    pdf_path = load_and_convert_pdf(ppt_path, output_dir, logger, verbose)
+    # Check if input is an image file
+    file_ext = os.path.splitext(ppt_path)[1].lower()
     
-    # Step 2: Extract timestamps
-    timestamps = extract_timestamps_for_pdf_pages(deduplicated_frames)
-    
-    # Step 3: Validate 1-to-1 mapping
-    validate_pdf_frame_mapping(pdf_path, timestamps, logger)
-    
-    # Step 4: OCR PDF pages
-    if verbose:
-        logger.debug("Step 2: Running OCR on PDF pages...")
-    
-    temp_img_dir = tempfile.mkdtemp(prefix="ppt_images_")
-    
-    try:
-        markdown_sections = []
-        
-        for page_idx, timestamp in enumerate(timestamps):
-            if verbose:
-                logger.debug(f"Processing page {page_idx + 1}/{len(timestamps)}: {timestamp}")
-            
-            # Convert PDF page to image
-            try:
-                page_image = convert_pdf_page_to_image(pdf_path, page_idx)
-                
-                # Save temp image
-                temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{page_idx}.png")
-                page_image.save(temp_img_path)
-                
-                section = f"\n### **{timestamp}**\n"
-                
-                if no_ocr:
-                    # Embed as base64
-                    b64 = image_to_base64(temp_img_path)
-                    if b64:
-                        section += f'<img src="data:image/png;base64,{b64}" />\n'
-                else:
-                    # OCR with marker
-                    ocr_result = run_marker_pdf_on_image(
-                        temp_img_path, output_dir, verbose, logger
-                    )
-                    
-                    if ocr_result["success"]:
-                        section += ocr_result["text"]
-                        
-                        # Add base64 images if any
-                        for filename, b64 in ocr_result["base64_images"].items():
-                            section += f'\n<img src="data:image/png;base64,{b64}" />\n'
-                    else:
-                        # OCR failed, fallback to base64
-                        if verbose:
-                            logger.warning(f"OCR failed for page {page_idx + 1}, using base64")
-                        
-                        b64 = image_to_base64(temp_img_path)
-                        if b64:
-                            section += f'<img src="data:image/png;base64,{b64}" />\n'
-                
-                markdown_sections.append(section)
-                
-                # Clean temp image
-                try:
-                    os.remove(temp_img_path)
-                except:
-                    pass
-            
-            except Exception as e:
-                print(f"Error: Failed to process page {page_idx + 1}: {e}")
-                raise SystemExit(1)
+    if file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
+        # Process as image input
+        markdown_sections = process_images_as_slides(
+            ppt_path, deduplicated_frames, output_dir, no_ocr, base_name, cite_timestamps, logger, verbose
+        )
         
         ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
         with open(ppt_md, "w", encoding="utf-8") as f:
             f.write("".join(markdown_sections))
         
         if verbose:
-            logger.debug(f"PDF OCR completed: {ppt_md}")
-    
-    finally:
-        # Clean up temp directory
-        import shutil
+            logger.debug(f"Image processing completed: {ppt_md}")
+    else:
+        # Process as PDF/PPT input
+        # Step 1: Load and convert PDF/PPT
+        pdf_path = load_and_convert_pdf(ppt_path, output_dir, logger, verbose)
+        
+        # Step 2: Extract timestamps
+        timestamps = extract_timestamps_for_pdf_pages(deduplicated_frames)
+        
+        # Step 3: Validate 1-to-1 mapping
+        validate_pdf_frame_mapping(pdf_path, timestamps, logger)
+        
+        # Step 4: OCR PDF pages
+        if verbose:
+            logger.debug("Step 2: Running OCR on PDF pages...")
+        
+        temp_img_dir = tempfile.mkdtemp(prefix="ppt_images_")
+        
         try:
-            shutil.rmtree(temp_img_dir)
-        except:
-            pass
+            markdown_sections = []
+            
+            for page_idx, timestamp in enumerate(timestamps):
+                if verbose:
+                    logger.debug(f"Processing page {page_idx + 1}/{len(timestamps)}: {timestamp}")
+                
+                # Convert PDF page to image
+                try:
+                    page_image = convert_pdf_page_to_image(pdf_path, page_idx)
+                    
+                    # Save temp image
+                    temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{page_idx}.png")
+                    page_image.save(temp_img_path)
+                    
+                    section = f"\n### **{timestamp}**\n"
+                    
+                    if no_ocr:
+                        # Embed as base64
+                        b64 = image_to_base64(temp_img_path)
+                        if b64:
+                            section += f'<img src="data:image/png;base64,{b64}" />\n'
+                    else:
+                        # OCR with marker
+                        ocr_result = run_marker_pdf_on_image(
+                            temp_img_path, output_dir, verbose, logger
+                        )
+                        
+                        if ocr_result["success"]:
+                            section += ocr_result["text"]
+                            
+                            # Add base64 images if any
+                            for filename, b64 in ocr_result["base64_images"].items():
+                                section += f'\n<img src="data:image/png;base64,{b64}" />\n'
+                        else:
+                            # OCR failed, fallback to base64
+                            if verbose:
+                                logger.warning(f"OCR failed for page {page_idx + 1}, using base64")
+                            
+                            b64 = image_to_base64(temp_img_path)
+                            if b64:
+                                section += f'<img src="data:image/png;base64,{b64}" />\n'
+                    
+                    markdown_sections.append(section)
+                    
+                    # Clean temp image
+                    try:
+                        os.remove(temp_img_path)
+                    except:
+                        pass
+                
+                except Exception as e:
+                    print(f"Error: Failed to process page {page_idx + 1}: {e}")
+                    raise SystemExit(1)
+            
+            ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
+            with open(ppt_md, "w", encoding="utf-8") as f:
+                f.write("".join(markdown_sections))
+            
+            if verbose:
+                logger.debug(f"PDF OCR completed: {ppt_md}")
+        
+        finally:
+            # Cleanup temp directory
+            import shutil
+            try:
+                shutil.rmtree(temp_img_dir)
+            except:
+                pass
     
     # Step 5: Rewrite audio
     if verbose:
@@ -297,7 +385,6 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     combined_markdown = combine_speech_and_slides(
         speech_markdown=audio_markdown,
         slides_markdown=ppt_content,
-        logger=logger,
         verbose=verbose
     )
     

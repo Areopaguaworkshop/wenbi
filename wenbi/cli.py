@@ -2240,7 +2240,7 @@ def main():
             "--ppt",
             type=str,
             default="",
-            help="Path to PPT or PDF file for PPT method",
+            help="Path to PPT, PDF, image, or OpenDocument file for PPT method",
         )
         ppt_parser.add_argument(
             "--no-ocr",
