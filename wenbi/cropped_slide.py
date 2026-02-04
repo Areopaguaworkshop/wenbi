@@ -6,7 +6,16 @@ Detect ROI → Crop Slides → OCR → Combine with Audio
 import os
 import logging
 import cv2
+import numpy as np
 from typing import List, Dict, Tuple, Optional
+
+# Import ultralytics for RT-DETR slide detection
+try:
+    from ultralytics import RTDETR
+    RTDETRAvailable = True
+except ImportError:
+    RTDETRAvailable = False
+    RTDETR = None
 
 
 def detect_slide_roi(video_path, roi_string, output_dir, logger, verbose):
@@ -44,116 +53,289 @@ def detect_slide_roi(video_path, roi_string, output_dir, logger, verbose):
             raise SystemExit(1)
     
     else:
-        # Auto-detect with RTDETR
+        # Auto-detect with RT-DETR using the working algorithm from video_slides.py
         if verbose:
             logger.debug("Auto-detecting ROI with RTDETR...")
         
+        # Extract first frame for detection
+        cap = cv2.VideoCapture(video_path)
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            print("Error: Cannot read first frame from video")
+            raise SystemExit(1)
+        
+        # Save first frame temporarily for detection
+        temp_frame_path = os.path.join(output_dir, "_temp_frame_for_roi.jpg")
+        cv2.imwrite(temp_frame_path, frame)
+        
         try:
-            from ultralytics import RTDETR
+            # Use working detect_slide_roi_with_yolo function
+            roi = detect_slide_roi_with_yolo(temp_frame_path, logger, verbose)
             
-            # Load model (auto-download if not present)
             if verbose:
-                logger.debug("Loading RTDETR model (rtdetr-l.pt)...")
+                logger.debug(f"ROI detection result: {roi}")
             
-            model = RTDETR("rtdetr-l.pt")
-            
-            # Extract first frame
-            cap = cv2.VideoCapture(video_path)
-            ret, frame = cap.read()
-            cap.release()
-            
-            if not ret:
-                print("Error: Cannot read first frame from video")
-                raise SystemExit(1)
-            
-            # Run detection
-            if verbose:
-                logger.debug("Running RTDETR detection on first frame...")
-            
-            results = model(frame)
-            
-            # Parse detections for slide rectangle (largest box)
-            detections = results[0]
-            if len(detections.boxes) == 0:
-                logger.warning("No objects detected, falling back to full frame")
+            if roi is None:
+                if verbose:
+                    logger.debug("ROI detection failed, using full frame fallback")
                 h, w = frame.shape[:2]
                 return (0, 0, w, h)
             
-            # Get largest bounding box (assuming it's the slide)
-            boxes = detections.boxes.xyxy.cpu().numpy()
-            areas = [(x2 - x1) * (y2 - y1) for x1, y1, x2, y2 in boxes]
-            max_idx = areas.index(max(areas))
-            x0, y0, x1, y1 = boxes[max_idx]
-            
-            roi = (int(x0), int(y0), int(x1), int(y1))
+            return roi
+        
+        except Exception as e:
             if verbose:
-                logger.debug(f"Detected ROI: {roi}")
+                logger.warning(f"RTDETR detection failed: {e}, falling back to full frame")
+            h, w = frame.shape[:2]
+            return (0, 0, w, h)
             
             return roi
         
-        except ImportError:
-            print("Error: ultralytics not installed. Run: rye add ultralytics")
-            raise SystemExit(1)
         except Exception as e:
-            logger.warning(f"RTDETR detection failed: {e}, falling back to full frame")
-            cap = cv2.VideoCapture(video_path)
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            cap.release()
+            if verbose:
+                logger.warning(f"RTDETR detection failed: {e}, falling back to full frame")
+            h, w = frame.shape[:2]
             return (0, 0, w, h)
+        
+        finally:
+            # Clean up temp frame
+            try:
+                os.remove(temp_frame_path)
+            except:
+                pass
+
+
+def detect_slide_roi_with_yolo(
+    frame_path: str, logger=None, verbose=False
+) -> Optional[Tuple[int, int, int, int]]:
+    """
+    Detect slide area using RT-DETR-v2 object detection model.
+    Detects speaker box in corners and creates mask to remove it,
+    isolating the slide area. Fast and efficient detection.
+    
+    Args:
+        frame_path: Path to frame image file
+        logger: Optional logger instance
+        verbose: Enable verbose logging
+        
+    Returns:
+        Tuple of (x0, y0, x1, y1) coordinates, or None if no detection (fallback to full-frame)
+    """
+    if not RTDETRAvailable:
+        if logger:
+            logger.warning("RTDETR not available. Install with: rye add ultralytics")
+        return None
+    
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    try:
+        img = cv2.imread(frame_path)
+        if img is None:
+            if logger:
+                logger.warning(f"Could not read frame: {frame_path}")
+            return None
+        
+        img_height, img_width = img.shape[:2]
+        
+        if verbose and logger:
+            logger.debug(f"Loading RT-DETR model for slide detection")
+        
+        # Load pre-trained RT-DETR model (fast object detection)
+        if not RTDETRAvailable:
+            if logger:
+                logger.warning("RTDETR not available. Install with: rye add ultralytics")
+            return None
+        
+        model = RTDETR("rtdetr-l.pt")
+        
+        if verbose and logger:
+            logger.debug(f"Running RT-DETR detection on frame: {frame_path}")
+        
+        # Run detection (no prompts needed, model auto-detects objects)
+        results = model(frame_path, verbose=False)
+        
+        if not results or len(results) == 0:
+            if logger and verbose:
+                logger.debug("RT-DETR detection returned no results, using full-frame fallback")
+            return None
+        
+        result = results[0]
+        
+        # Check if bounding boxes exist
+        if not hasattr(result, 'boxes') or result.boxes is None or len(result.boxes) == 0:
+            if verbose and logger:
+                logger.debug("No objects detected by RT-DETR, using full-frame fallback")
+            return None
+        
+        if verbose and logger:
+            logger.debug(f"RT-DETR detected {len(result.boxes)} objects")
+        
+        # Define corner regions to identify speaker box
+        corner_regions = {
+            "top-right": (int(img_width * 0.6), 0, img_width, int(img_height * 0.4)),
+            "top-left": (0, 0, int(img_width * 0.4), int(img_height * 0.4)),
+            "bottom-right": (int(img_width * 0.6), int(img_height * 0.6), img_width, img_height),
+            "bottom-left": (0, int(img_height * 0.6), int(img_width * 0.4), img_height),
+        }
+        
+        speaker_box = None
+        corner_location = None
+        
+        # Find largest object in corner regions (likely speaker)
+        for box in result.boxes:
+            x0, y0, x1, y1 = box.xyxy[0].cpu().numpy().astype(int)
+            box_area = (x1 - x0) * (y1 - y0)
+            
+            # Check if box is in any corner region
+            for corner_name, (cx0, cy0, cx1, cy1) in corner_regions.items():
+                # Check if box centroid or significant overlap is in corner
+                box_cx = (x0 + x1) / 2
+                box_cy = (y0 + y1) / 2
+                
+                if cx0 <= box_cx <= cx1 and cy0 <= box_cy <= cy1:
+                    # This box is in a corner, likely speaker
+                    if speaker_box is None or box_area > (speaker_box[2] - speaker_box[0]) * (speaker_box[3] - speaker_box[1]):
+                        speaker_box = (x0, y0, x1, y1)
+                        corner_location = corner_name
+                        
+                        if verbose and logger:
+                            logger.debug(f"RT-DETR detected object in {corner_name} corner: {speaker_box} (area: {box_area})")
+                    break
+        
+        # New approach: Use geometric inference based on speaker box detection
+        # If we detect a speaker box in a corner, infer slide area as the remaining area
+        
+        if speaker_box is not None and corner_location:
+            # Define slide area based on speaker box location
+            sx0, sy0, sx1, sy1 = speaker_box
+            
+            if corner_location == "top-right":
+                # Slide area: everything except top-right corner
+                slide_roi = (0, 0, int(img_width * 0.85), img_height)
+            elif corner_location == "top-left":
+                # Slide area: everything except top-left corner  
+                slide_roi = (int(img_width * 0.15), 0, img_width, img_height)
+            elif corner_location == "bottom-right":
+                # Slide area: everything except bottom-right corner
+                slide_roi = (0, 0, int(img_width * 0.85), int(img_height * 0.85))
+            elif corner_location == "bottom-left":
+                # Slide area: everything except bottom-left corner
+                slide_roi = (int(img_width * 0.15), 0, img_width, int(img_height * 0.85))
+            else:
+                # Default to 85% width centered
+                margin_w = int(img_width * 0.075)
+                slide_roi = (margin_w, 0, img_width - margin_w, img_height)
+            
+            if verbose and logger:
+                logger.debug(f"Inferred slide ROI from speaker box at {corner_location}: {slide_roi}")
+            
+            return slide_roi
+        else:
+            # No speaker box detected, try to find largest object
+            
+            # Find the largest detected object overall
+            all_boxes = []
+            for box in result.boxes:
+                x0, y0, x1, y1 = box.xyxy[0].cpu().numpy().astype(int)
+                box_area = (x1 - x0) * (y1 - y0)
+                aspect_ratio = (x1 - x0) / (y1 - y0) if (y1 - y0) > 0 else 0
+                
+                # Prefer objects with slide-like aspect ratios (4:3 to 16:9)
+                aspect_score = 1.0
+                if 1.2 <= aspect_ratio <= 2.0:
+                    aspect_score = 2.0  # Boost slide-like aspect ratios
+                
+                all_boxes.append({
+                    'box': (x0, y0, x1, y1),
+                    'area': box_area,
+                    'aspect_score': aspect_score,
+                    'center': ((x0 + x1) / 2, (y0 + y1) / 2)
+                })
+            
+            if all_boxes:
+                # Score by area * aspect_score, prefer centered objects
+                best_box = max(all_boxes, key=lambda x: (
+                    x['area'] * x['aspect_score'],
+                    -abs(x['center'][0] - img_width / 2),  # Prefer horizontally centered
+                    -abs(x['center'][1] - img_height / 2)   # Prefer vertically centered
+                ))
+                
+                slide_roi = tuple(int(coord) for coord in best_box['box'])
+                
+                if verbose and logger:
+                    logger.debug(f"Selected best slide ROI: {slide_roi}")
+                
+                return slide_roi
+        
+        # Final fallback: use 85% width centered area
+        margin_w = int(img_width * 0.075)  # 7.5% margin on each side
+        slide_roi = (margin_w, 0, img_width - margin_w, img_height)
+        
+        if verbose and logger:
+            logger.debug(f"Fallback slide ROI: {slide_roi}")
+        
+        return slide_roi
+        
+    except Exception as e:
+        if logger:
+            logger.error(f"Error in RT-DETR slide detection: {e}")
+        return None
 
 
 def crop_slides_from_frames(deduplicated_frames, roi_coords, output_dir, 
                             base_name, logger, verbose):
-    """Crop frames to ROI region and save."""
-    
-    if verbose:
-        logger.debug(f"Cropping frames to ROI {roi_coords}...")
-    
-    x0, y0, x1, y1 = roi_coords
-    crop_dir = os.path.join(output_dir, f"{base_name}_cropped-slide")
-    os.makedirs(crop_dir, exist_ok=True)
-    
-    cropped_frames = []
-    
-    for frame_dict in deduplicated_frames:
-        timestamp = frame_dict["timestamp"]
-        original_path = frame_dict["frame_path"]
-        
-        try:
-            # Load and crop
-            img = cv2.imread(original_path)
-            if img is None:
-                logger.warning(f"Cannot read frame: {original_path}")
-                continue
-            
-            cropped = img[y0:y1, x0:x1]
-            
-            # Save cropped frame
-            filename = os.path.basename(original_path)
-            cropped_path = os.path.join(crop_dir, f"cropped_{filename}")
-            cv2.imwrite(cropped_path, cropped)
-            
-            cropped_frames.append({
-                "timestamp": timestamp,
-                "original_frame": original_path,
-                "cropped_frame": cropped_path
-            })
-            
-            if verbose:
-                logger.debug(f"Cropped {timestamp}: {cropped_path}")
-        
-        except Exception as e:
-            logger.warning(f"Failed to crop {timestamp}: {e}")
-    
-    if not cropped_frames:
-        print("Error: No frames successfully cropped")
-        raise SystemExit(1)
-    
-    if verbose:
-        logger.debug(f"Cropped {len(cropped_frames)} frames to {crop_dir}")
-    
-    return cropped_frames
+     """Crop frames to ROI region and save."""
+     
+     if verbose:
+         logger.debug(f"Cropping frames to ROI {roi_coords}...")
+     
+     x0, y0, x1, y1 = roi_coords
+     crop_dir = os.path.join(output_dir, f"{base_name}_cropped-slide")
+     os.makedirs(crop_dir, exist_ok=True)
+     
+     cropped_frames = []
+     
+     for frame_dict in deduplicated_frames:
+         timestamp = frame_dict["timestamp"]
+         original_path = frame_dict["frame_path"]
+         
+         try:
+             # Load and crop
+             img = cv2.imread(original_path)
+             if img is None:
+                 logger.warning(f"Cannot read frame: {original_path}")
+                 continue
+             
+             cropped = img[y0:y1, x0:x1]
+             
+             # Save cropped frame
+             filename = os.path.basename(original_path)
+             cropped_path = os.path.join(crop_dir, f"cropped_{filename}")
+             cv2.imwrite(cropped_path, cropped)
+             
+             cropped_frames.append({
+                 "timestamp": timestamp,
+                 "original_frame": original_path,
+                 "cropped_frame": cropped_path
+             })
+             
+             if verbose:
+                 logger.debug(f"Cropped {timestamp}: {cropped_path}")
+         
+         except Exception as e:
+             logger.warning(f"Failed to crop {timestamp}: {e}")
+     
+     if not cropped_frames:
+         print("Error: No frames successfully cropped")
+         raise SystemExit(1)
+     
+     if verbose:
+         logger.debug(f"Cropped {len(cropped_frames)} frames to {crop_dir}")
+     
+     return cropped_frames
 
 
 def execute_cropped_slide_method(video_path, deduplicated_frames, roi_string, 
@@ -175,17 +357,17 @@ def execute_cropped_slide_method(video_path, deduplicated_frames, roi_string,
     if verbose:
         logger.debug("=== TYPE 2: CROPPED-SLIDE Method ===")
     
-    # Step 1: Detect ROI
+    # Step 1: Detect ROI with RTDETR (finds largest rectangle = slide area)
     roi_coords = detect_slide_roi(video_path, roi_string, output_dir, logger, verbose)
     
-    # Step 2: Crop slides
+    # Step 2: Crop slides to ROI
     cropped_frames = crop_slides_from_frames(
         deduplicated_frames, roi_coords, output_dir, base_name, logger, verbose
     )
     
     # Step 3: OCR cropped slides
     if verbose:
-        logger.debug("Step 2: Running OCR on cropped slides...")
+        logger.debug("Step 3: Running OCR on cropped slides...")
     
     if no_ocr:
         if verbose:
@@ -281,7 +463,6 @@ def execute_cropped_slide_method(video_path, deduplicated_frames, roi_string,
     combined_markdown = combine_speech_and_slides(
         speech_markdown=audio_markdown,
         slides_markdown=slides_content,
-        logger=logger,
         verbose=verbose
     )
     
