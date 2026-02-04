@@ -27,6 +27,7 @@ ENV/
 output/**/*
 model/**/*
 example/**/*
+instruction/**/*
 *.wav
 *.md
 !README.md
