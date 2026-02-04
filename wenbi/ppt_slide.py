@@ -6,7 +6,10 @@ Load/Convert PDF/PPT/Images → Extract Timestamps → OCR → Combine with Audi
 import os
 import logging
 import subprocess
-from typing import List, Tuple
+from typing import List, Tuple, Dict
+import cv2
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
 
 
 def load_and_convert_pdf(ppt_pdf_path, output_dir, logger, verbose):
@@ -158,44 +161,101 @@ def extract_timestamps_for_pdf_pages(deduplicated_frames):
     return timestamps
 
 
-def validate_pdf_frame_mapping(pdf_path, timestamps, logger):
+def match_pdf_pages_to_frames(pdf_path, deduplicated_frames, logger, verbose, ssim_threshold=0.8):
     """
-    Validate that number of PDF pages matches number of timestamps.
-    For images, skip validation.
-    """
-    file_ext = os.path.splitext(pdf_path)[1].lower()
+    Match PDF pages to deduplicated frames using OpenCV SSIM comparison.
+    Uses sequential matching with skip logic - moves to next if no match found.
     
-    if file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
-        # Skip validation for image inputs
-        if logger:
-            logger.debug(f"Skipping PDF validation for image input: {file_ext}")
-        return
+    Returns: List of tuples (pdf_page_idx, frame_data) for matched pairs
+    """
+    import PyPDF2
+    
+    logger.debug(f"Step 4: Starting PDF-to-Frame matching (SSIM threshold: {ssim_threshold})")
     
     try:
-        import PyPDF2
-        
+        # Get PDF page count
         with open(pdf_path, "rb") as f:
             pdf = PyPDF2.PdfReader(f)
             num_pages = len(pdf.pages)
         
-        num_timestamps = len(timestamps)
+        num_frames = len(deduplicated_frames)
+        logger.debug(f"PDF has {num_pages} pages, Found {num_frames} deduplicated frames")
         
-        if num_pages != num_timestamps:
-            print(
-                f"Error: PDF page count ({num_pages}) does not match "
-                f"deduplicated frames count ({num_timestamps}). "
-                f"Please check your inputs."
-            )
-            raise SystemExit(1)
+        matched_pairs = []
+        pdf_idx = 0
+        frame_idx = 0
         
-        if logger:
-            logger.debug(f"Mapping validated: {num_pages} pages ↔ {num_timestamps} timestamps")
+        while pdf_idx < num_pages and frame_idx < num_frames:
+            logger.debug(f"Matching PDF page {pdf_idx + 1}/{num_pages} with frame {frame_idx + 1}/{num_frames}")
+            
+            # Convert current PDF page to image
+            try:
+                pdf_page_img = convert_pdf_page_to_image(pdf_path, pdf_idx)
+                if verbose:
+                    logger.debug(f"  Converted PDF page {pdf_idx + 1} to image")
+            except Exception as e:
+                logger.warning(f"  Failed to convert PDF page {pdf_idx + 1}: {e}, skipping")
+                pdf_idx += 1
+                continue
+            
+            # Get current frame image
+            frame_data = deduplicated_frames[frame_idx]
+            frame_path = frame_data["frame_path"]
+            
+            try:
+                frame_img = cv2.imread(frame_path)
+                if frame_img is None:
+                    logger.warning(f"  Failed to read frame {frame_idx + 1}: {frame_path}, skipping")
+                    frame_idx += 1
+                    continue
+                if verbose:
+                    logger.debug(f"  Read frame {frame_idx + 1}: {frame_path}")
+            except Exception as e:
+                logger.warning(f"  Failed to read frame {frame_idx + 1}: {e}, skipping")
+                frame_idx += 1
+                continue
+            
+            # Convert images to grayscale and compute SSIM
+            pdf_gray = cv2.cvtColor(np.array(pdf_page_img), cv2.COLOR_RGB2GRAY)
+            frame_gray = cv2.cvtColor(frame_img, cv2.COLOR_BGR2GRAY)
+            
+            # Resize both images to same size for comparison
+            h, w = pdf_gray.shape
+            frame_resized = cv2.resize(frame_gray, (w, h))
+            
+            # Calculate SSIM
+            try:
+                similarity = ssim(pdf_gray, frame_resized, data_range=255)
+                logger.debug(f"  SSIM score: {similarity:.4f} (threshold: {ssim_threshold})")
+                
+                if similarity >= ssim_threshold:
+                    # Match found!
+                    logger.debug(f"  ✓ MATCH FOUND: PDF page {pdf_idx + 1} ↔ Frame {frame_idx + 1} ({frame_data['timestamp']})")
+                    matched_pairs.append((pdf_idx, frame_data))
+                    pdf_idx += 1
+                    frame_idx += 1
+                else:
+                    # No match, try next frame
+                    if verbose:
+                        logger.debug(f"  ✗ No match, trying next frame")
+                    frame_idx += 1
+            
+            except Exception as e:
+                logger.warning(f"  Error computing SSIM: {e}, skipping frame")
+                frame_idx += 1
+        
+        logger.debug(f"Matching complete: {len(matched_pairs)} pairs matched out of {num_pages} pages and {num_frames} frames")
+        
+        if len(matched_pairs) == 0:
+            logger.warning("No PDF pages matched with any frames!")
+        
+        return matched_pairs
     
     except ImportError:
         print("Error: PyPDF2 not installed. Run: rye add PyPDF2")
         raise SystemExit(1)
     except Exception as e:
-        print(f"Error: Failed to validate PDF: {e}")
+        print(f"Error: Failed to match PDF pages to frames: {e}")
         raise SystemExit(1)
 
 
@@ -224,12 +284,12 @@ def convert_pdf_page_to_image(pdf_path, page_idx):
 
 
 def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
-                      no_ocr, no_clean, base_name, cite_timestamps, llm,
-                      chunk_length, max_tokens, timeout, temperature, lang,
-                      transcribe_model, multi_language, transcribe_lang,
-                      logger, verbose):
+                       no_ocr, no_clean, base_name, cite_timestamps, llm,
+                       chunk_length, max_tokens, timeout, temperature, lang,
+                       transcribe_model, multi_language, transcribe_lang,
+                       logger, verbose, ssim_threshold=0.8):
     """
-    Execute PPT method workflow.
+    Execute PPT method workflow with OpenCV-based PDF-to-Frame matching.
     Returns: (combine_md_path, combine_clean_md_path)
     """
     from wenbi.cli import (
@@ -242,12 +302,19 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     
     if verbose:
         logger.debug("=== TYPE 3: PPT Method ===")
+        logger.debug(f"Video: {video_path}")
+        logger.debug(f"PPT/PDF: {ppt_path}")
+        logger.debug(f"Output dir: {output_dir}")
+        logger.debug(f"Deduplicated frames count: {len(deduplicated_frames)}")
     
     # Check if input is an image file
     file_ext = os.path.splitext(ppt_path)[1].lower()
     
     if file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
         # Process as image input
+        if verbose:
+            logger.debug("Processing single image file as slide")
+        
         markdown_sections = process_images_as_slides(
             ppt_path, deduplicated_frames, output_dir, no_ocr, base_name, cite_timestamps, logger, verbose
         )
@@ -256,54 +323,68 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
         with open(ppt_md, "w", encoding="utf-8") as f:
             f.write("".join(markdown_sections))
         
-        if verbose:
-            logger.debug(f"Image processing completed: {ppt_md}")
+        logger.debug(f"Image processing completed: {ppt_md}")
     else:
         # Process as PDF/PPT input
-        # Step 1: Load and convert PDF/PPT
+        logger.debug("Step 1: Loading and converting PDF/PPT file...")
         pdf_path = load_and_convert_pdf(ppt_path, output_dir, logger, verbose)
+        logger.debug(f"Loaded PDF: {pdf_path}")
         
-        # Step 2: Extract timestamps
-        timestamps = extract_timestamps_for_pdf_pages(deduplicated_frames)
+        # Step 4: Use OpenCV SSIM to match PDF pages to frames
+        logger.debug("Step 2: Matching PDF pages to video frames using OpenCV SSIM...")
+        matched_pairs = match_pdf_pages_to_frames(
+            pdf_path, 
+            deduplicated_frames, 
+            logger, 
+            verbose, 
+            ssim_threshold=ssim_threshold
+        )
         
-        # Step 3: Validate 1-to-1 mapping
-        validate_pdf_frame_mapping(pdf_path, timestamps, logger)
+        if not matched_pairs:
+            print("Error: No PDF pages matched with video frames. Check your inputs.")
+            raise SystemExit(1)
         
-        # Step 4: OCR PDF pages
-        if verbose:
-            logger.debug("Step 2: Running OCR on PDF pages...")
+        logger.debug(f"Successfully matched {len(matched_pairs)} PDF pages to frames")
+        
+        # Step 5: OCR matched PDF pages with their timestamps
+        logger.debug("Step 3: Running OCR on matched PDF pages...")
         
         temp_img_dir = tempfile.mkdtemp(prefix="ppt_images_")
         
         try:
             markdown_sections = []
             
-            for page_idx, timestamp in enumerate(timestamps):
-                if verbose:
-                    logger.debug(f"Processing page {page_idx + 1}/{len(timestamps)}: {timestamp}")
+            for pair_idx, (pdf_page_idx, frame_data) in enumerate(matched_pairs):
+                timestamp = frame_data["timestamp"]
                 
-                # Convert PDF page to image
+                if verbose:
+                    logger.debug(f"Processing matched pair {pair_idx + 1}/{len(matched_pairs)}: PDF page {pdf_page_idx + 1} ↔ {timestamp}")
+                
                 try:
-                    page_image = convert_pdf_page_to_image(pdf_path, page_idx)
+                    # Convert PDF page to image
+                    page_image = convert_pdf_page_to_image(pdf_path, pdf_page_idx)
                     
                     # Save temp image
-                    temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{page_idx}.png")
+                    temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{pdf_page_idx}.png")
                     page_image.save(temp_img_path)
                     
                     section = f"\n### **{timestamp}**\n"
                     
                     if no_ocr:
                         # Embed as base64
+                        logger.debug(f"  Embedding page {pdf_page_idx + 1} as base64 (--no-ocr)")
                         b64 = image_to_base64(temp_img_path)
                         if b64:
                             section += f'<img src="data:image/png;base64,{b64}" />\n'
                     else:
                         # OCR with marker
+                        logger.debug(f"  Running marker OCR on page {pdf_page_idx + 1}...")
                         ocr_result = run_marker_pdf_on_image(
                             temp_img_path, output_dir, verbose, logger
                         )
                         
                         if ocr_result["success"]:
+                            logger.debug(f"  OCR successful for page {pdf_page_idx + 1}")
                             section += ocr_result["text"]
                             
                             # Add base64 images if any
@@ -311,8 +392,7 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
                                 section += f'\n<img src="data:image/png;base64,{b64}" />\n'
                         else:
                             # OCR failed, fallback to base64
-                            if verbose:
-                                logger.warning(f"OCR failed for page {page_idx + 1}, using base64")
+                            logger.warning(f"  OCR failed for page {pdf_page_idx + 1}, using base64")
                             
                             b64 = image_to_base64(temp_img_path)
                             if b64:
@@ -327,15 +407,14 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
                         pass
                 
                 except Exception as e:
-                    print(f"Error: Failed to process page {page_idx + 1}: {e}")
+                    logger.warning(f"Error processing page {pdf_page_idx + 1}: {e}")
                     raise SystemExit(1)
             
             ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
             with open(ppt_md, "w", encoding="utf-8") as f:
                 f.write("".join(markdown_sections))
             
-            if verbose:
-                logger.debug(f"PDF OCR completed: {ppt_md}")
+            logger.debug(f"PDF OCR completed: {ppt_md}")
         
         finally:
             # Cleanup temp directory
@@ -345,9 +424,8 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
             except:
                 pass
     
-    # Step 5: Rewrite audio
-    if verbose:
-        logger.debug("Step 3: Processing audio...")
+    # Step 6: Process audio
+    logger.debug("Step 4: Processing audio from video...")
     
     params = {
         "output_dir": output_dir,
@@ -365,6 +443,7 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
         "subcommand": "rewrite"
     }
     
+    logger.debug("Calling process_input for audio processing...")
     result = process_input(
         file_path=video_path,
         url="",
@@ -372,12 +451,10 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     )
     
     audio_markdown = result[0]
-    if verbose:
-        logger.debug("Audio processing completed")
+    logger.debug("Audio processing completed")
     
-    # Step 6: Combine
-    if verbose:
-        logger.debug("Step 4: Combining PPT and audio markdown...")
+    # Step 7: Combine
+    logger.debug("Step 5: Combining PDF and audio markdown...")
     
     with open(ppt_md, "r", encoding="utf-8") as f:
         ppt_content = f.read()
@@ -392,17 +469,18 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     with open(combine_md, "w", encoding="utf-8") as f:
         f.write(combined_markdown)
     
-    if verbose:
-        logger.debug(f"Combined markdown: {combine_md}")
+    logger.debug(f"Combined markdown created: {combine_md}")
     
-    # Step 7: Clean (if not --no-clean)
+    # Step 8: Clean (if not --no-clean)
     if no_clean:
         combine_clean_md = None
-        if verbose:
-            logger.debug("--no-clean: Skipping clean phase")
+        logger.debug("--no-clean flag set: Skipping clean phase")
     else:
+        logger.debug("Step 6: Cleaning combined markdown...")
         combine_clean_md = clean_combined_markdown(
             combine_md, output_dir, base_name, logger, verbose
         )
+        logger.debug(f"Cleaned markdown created: {combine_clean_md}")
     
+    logger.debug("=== PPT Method Complete ===")
     return combine_md, combine_clean_md

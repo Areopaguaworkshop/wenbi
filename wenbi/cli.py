@@ -29,9 +29,21 @@ def setup_logging(verbose=False):
         level = logging.INFO
         format_str = "%(message)s"
 
-    logging.basicConfig(
-        level=level, format=format_str, handlers=[logging.StreamHandler(sys.stdout)]
-    )
+    # Get the root logger and clear any existing handlers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Remove existing handlers to avoid duplicates
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create and add a new StreamHandler
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(level)
+    formatter = logging.Formatter(format_str)
+    handler.setFormatter(formatter)
+    root_logger.addHandler(handler)
+    
     return logging.getLogger(__name__)
 
 
@@ -890,6 +902,13 @@ def handle_ppt_command(args):
         logger=logger,
         verbose=args.verbose
     )
+    
+    if args.verbose:
+        logger.debug(f"Frame extraction complete: {len(deduplicated_frames)} deduplicated frames extracted")
+        for i, frame in enumerate(deduplicated_frames[:5]):  # Show first 5
+            logger.debug(f"  Frame {i+1}: {frame['timestamp']} -> {frame['frame_path']}")
+        if len(deduplicated_frames) > 5:
+            logger.debug(f"  ... and {len(deduplicated_frames) - 5} more frames")
 
     # ROUTE TO METHOD
     try:
@@ -918,7 +937,8 @@ def handle_ppt_command(args):
                 multi_language=args.multi_language,
                 transcribe_lang=args.transcribe_lang,
                 logger=logger,
-                verbose=args.verbose
+                verbose=args.verbose,
+                ssim_threshold=args.ssim_threshold
             )
 
         elif args.cropped_slide is not None:

@@ -544,8 +544,12 @@ pydyf==0.12.1
     # via weasyprint
 pygments==2.19.1
     # via rich
+pymupdf==1.26.7
+    # via wenbi
 pyparsing==3.2.3
     # via matplotlib
+pypdf2==3.0.1
+    # via wenbi
 pypdfium2==4.30.0
     # via pdftext
     # via surya-ocr

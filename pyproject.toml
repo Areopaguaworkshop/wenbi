@@ -32,6 +32,8 @@ dependencies = [
     "srtranslator>=0.3.9",
     "scenedetect>=0.6.4",
     "ultralytics>=8.4.11",
+    "pypdf2>=3.0.1",
+    "pymupdf>=1.26.7",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"

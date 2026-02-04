@@ -71,6 +71,8 @@ def process_input(
         logger.debug(f"Input URL: {url}")
         logger.debug(f"Subcommand: {subcommand}")
         logger.debug(f"LLM: {llm}")
+        logger.debug(f"Transcribe model: {transcribe_model}")
+        logger.debug(f"Target language: {lang}")
     # Use current directory for CLI, package directory for web interface
     out_dir = (
         output_dir
@@ -87,51 +89,85 @@ def process_input(
     # Check if input is video/audio/URL
     if is_video_audio_or_url(file_path, url):
         # Step 1: Convert to WAV
+        if verbose:
+            logger.debug("Step 1: Converting to WAV...")
         try:
             if url:
+                if verbose:
+                    logger.debug(f"Downloading from URL: {url}")
                 file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
+                if verbose:
+                    logger.debug(f"Downloaded file: {file_path}")
             elif file_path:
                 # Use extract_audio_segment for all audio/video files except .wav
                 if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v',
                                              '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
+                    if verbose:
+                        logger.debug(f"Extracting audio segment from: {file_path}")
                     file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
+                    if verbose:
+                        logger.debug(f"Extracted WAV: {file_path}")
                 # If .wav, do nothing (already correct format)
         except Exception as e:
             print(f"Error converting to WAV: {e}")
             return "Error: Failed to convert to WAV", None, None, None
 
         # Step 2: Transcribe to VTT
+        if verbose:
+            logger.debug("Step 2: Transcribing to VTT...")
         try:
             if multi_language:
+                if verbose:
+                    logger.debug("Using multi-language transcription")
                 from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
 
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
+                if verbose:
+                    logger.debug(f"Running multi-speaker transcription on {base_name}")
                 transcriptions = transcribe_multi_speaker(
                     file_path, model_size=transcribe_model
                 )
+                if verbose:
+                    logger.debug(f"Transcriptions: {len(transcriptions)} speakers")
                 vtt_files = speaker_vtt(
                     transcriptions, output_dir=out_dir, base_filename=base_name
                 )
+                if verbose:
+                    logger.debug(f"Generated VTT files for {len(vtt_files)} speakers")
             else:
+                if verbose:
+                    logger.debug(f"Running single-language transcription (model: {transcribe_model})")
                 lang_code = transcribe_lang if transcribe_lang.strip() else None
+                if verbose and lang_code:
+                    logger.debug(f"Transcription language: {lang_code}")
                 vtt_file, _ = transcribe(
                     file_path,
                     language=lang_code,
                     output_dir=out_dir,
                     model_size=transcribe_model,
                 )
+                if verbose:
+                    logger.debug(f"Transcription completed: {vtt_file}")
                 vtt_files = {None: vtt_file}
         except Exception as e:
             print(f"Error during transcription: {e}")
+            if verbose:
+                logger.exception("Transcription error details:")
             return "Error: Failed during transcription", None, None, None
 
         # Step 3: Process VTT files with subcommand
+        if verbose:
+            logger.debug(f"Step 3: Processing VTT with subcommand '{subcommand}'...")
         if subcommand:
             # Process each VTT file with the specified subcommand
             final_outputs = {}
             for speaker, vtt_file in vtt_files.items():
                 try:
+                    if verbose:
+                        logger.debug(f"Processing VTT for {speaker or 'default speaker'}")
                     if subcommand == "translate":
+                        if verbose:
+                            logger.debug(f"Translating to {lang}...")
                         result = translate(
                             vtt_file,
                             output_dir=out_dir,
@@ -144,6 +180,8 @@ def process_input(
                             cite_timestamps=cite_timestamps,
                         )
                     elif subcommand == "rewrite":
+                        if verbose:
+                            logger.debug(f"Rewriting in {lang}...")
 
                         rewrite_text, rewrite_file = rewrite(
 vtt_file,
@@ -157,9 +195,13 @@ vtt_file,
                             cite_timestamps=cite_timestamps,
 
                         )
+                        if verbose:
+                            logger.debug(f"Rewrite completed: {rewrite_file}")
 
                         result = (rewrite_text, rewrite_file)
                     elif subcommand == "academic":
+                        if verbose:
+                            logger.debug(f"Academic processing in {lang}...")
                         result = academic(
                             vtt_file,
                             output_dir=out_dir,
@@ -171,12 +213,16 @@ vtt_file,
                             temperature=temperature,
                             cite_timestamps=cite_timestamps,
                         )
+                        if verbose:
+                            logger.debug(f"Academic processing completed")
                     else:
                         result = "Error: Unknown subcommand"
                     
                     final_outputs[speaker if speaker else "output"] = result
                 except Exception as e:
                     print(f"Error processing VTT with {subcommand}: {e}")
+                    if verbose:
+                        logger.exception(f"Error details for {subcommand}:")
                     return f"Error: Failed during {subcommand} processing", None, None, None
 
             if multi_language:
@@ -197,6 +243,8 @@ vtt_file,
                     return result, result, None, base_name
         else:
             # Original behavior for backward compatibility
+            if verbose:
+                logger.debug("No subcommand specified, using original VTT processing logic")
             return _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language)
 
     # Check if input is text file (VTT, markdown, docx)
