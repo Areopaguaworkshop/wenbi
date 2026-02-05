@@ -869,10 +869,10 @@ def handle_ppt_command(args):
         if args.verbose:
             logger.debug("Downloading video from URL...")
 
-        from wenbi.utils import download_audio
+        from wenbi.utils import download_video
 
         try:
-            download_result = download_audio(
+            download_result = download_video(
                 args.input, output_dir=output_dir, verbose=args.verbose
             )
             if download_result:

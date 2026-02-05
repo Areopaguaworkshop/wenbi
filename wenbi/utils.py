@@ -495,6 +495,91 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
         raise Exception(error_msg)
 
 
+def download_video(url, output_dir=None, verbose=False):
+    """
+    Downloads video from a URL using yt-dlp.
+    
+    Args:
+        url (str): URL to download video from
+        output_dir (str): Directory to save the downloaded video
+        verbose (bool): Enable verbose logging
+    
+    Returns:
+        str: Path to the downloaded video file
+    """
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug(f"Starting video download from URL: {url}")
+    
+    import subprocess
+    
+    if output_dir is None:
+        output_dir = os.getcwd()
+    
+    if verbose:
+        logger.debug(f"Output directory: {output_dir}")
+    
+    try:
+        # Get video title using yt-dlp
+        get_title_cmd = ["yt-dlp", "--get-title", "--no-warnings", url]
+        if verbose:
+            logger.debug(f"Fetching title with command: {' '.join(get_title_cmd)}")
+        
+        title_result = subprocess.run(get_title_cmd, capture_output=True, text=True, check=True)
+        video_title = title_result.stdout.strip()
+        base_filename = _sanitize_filename(video_title)
+        
+        if verbose:
+            logger.debug(f"Sanitized filename: {base_filename}")
+
+        # Set the output path for the downloaded file
+        temp_path = os.path.join(output_dir, base_filename)
+
+        # Download video using yt-dlp (best format)
+        cmd = [
+            "yt-dlp",
+            "-f", "best[ext=mp4]/best",
+            "--output", f"{temp_path}.%(ext)s",
+            url
+        ]
+        
+        if verbose:
+            logger.debug(f"Running yt-dlp command: {' '.join(cmd)}")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        if verbose:
+            logger.debug("yt-dlp download completed successfully")
+        
+        # Find the downloaded file
+        downloaded_file = None
+        for ext in ['.mp4', '.mkv', '.webm', '.mov', '.avi']:
+            candidate = f"{temp_path}{ext}"
+            if os.path.exists(candidate):
+                downloaded_file = candidate
+                break
+        
+        if not downloaded_file:
+            raise FileNotFoundError("Downloaded video file not found")
+        
+        if verbose:
+            logger.debug(f"Video download completed: {downloaded_file}")
+        
+        return downloaded_file
+        
+    except subprocess.CalledProcessError as e:
+        error_msg = f"Error downloading video: {e.stderr}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
+    except Exception as e:
+        error_msg = f"Error in download_video: {e}"
+        if verbose:
+            logger.debug(error_msg)
+        raise Exception(error_msg)
+
+
 def language_detect(file_path, detected_lang=None, verbose=False):
     """Detect language of the content in a file"""
     logger = logging.getLogger(__name__)
