@@ -495,9 +495,109 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
         raise Exception(error_msg)
 
 
+def _select_best_format(formats, verbose=False, logger=None):
+    """
+    Intelligently select the best video+audio format combination from available formats.
+    
+    Priority:
+    1. Best quality video with audio (merged)
+    2. Best video + best audio combination
+    3. Best audio-only (if no video available)
+    4. Best video-only (fallback, will be mute)
+    
+    Args:
+        formats (list): List of format dicts from yt-dlp
+        verbose (bool): Enable verbose logging
+        logger: Logger object
+    
+    Returns:
+        str: Format string for yt-dlp
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    if not formats:
+        if verbose:
+            logger.debug("No formats available, using default format")
+        return "bestvideo+bestaudio/best"
+    
+    # Separate video-only, audio-only, and combined formats
+    video_only = []
+    audio_only = []
+    combined = []
+    
+    for fmt in formats:
+        format_id = fmt.get("format_id")
+        vcodec = fmt.get("vcodec", "none")
+        acodec = fmt.get("acodec", "none")
+        height = fmt.get("height")
+        fps = fmt.get("fps")
+        
+        # Skip formats with no video or audio codecs
+        if vcodec == "none" and acodec == "none":
+            continue
+        
+        # Categorize formats
+        if vcodec != "none" and acodec != "none":
+            combined.append((fmt, height or 0, fps or 0))
+        elif vcodec != "none":
+            video_only.append((fmt, height or 0, fps or 0))
+        elif acodec != "none":
+            audio_only.append((fmt, fmt.get("abr", 0)))
+    
+    if verbose:
+        logger.debug(f"Format breakdown - Combined: {len(combined)}, Video-only: {len(video_only)}, Audio-only: {len(audio_only)}")
+    
+    # Strategy 1: If we have good combined formats, use the best one
+    if combined:
+        combined.sort(key=lambda x: (x[1], x[2]), reverse=True)  # Sort by height, then fps
+        best_combined = combined[0][0]
+        format_id = best_combined.get("format_id")
+        if verbose:
+            height = best_combined.get("height", "unknown")
+            logger.debug(f"Using best combined format: {format_id} ({height}p)")
+        return format_id
+    
+    # Strategy 2: Merge best video + best audio
+    if video_only and audio_only:
+        video_only.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        audio_only.sort(key=lambda x: x[1], reverse=True)
+        
+        best_video_id = video_only[0][0].get("format_id")
+        best_audio_id = audio_only[0][0].get("format_id")
+        
+        format_str = f"{best_video_id}+{best_audio_id}"
+        if verbose:
+            height = video_only[0][0].get("height", "unknown")
+            logger.debug(f"Using best video+audio combination: {format_str} ({height}p)")
+        return format_str
+    
+    # Strategy 3: Use best audio-only if no video is available
+    if audio_only and not video_only:
+        audio_only.sort(key=lambda x: x[1], reverse=True)
+        best_audio_id = audio_only[0][0].get("format_id")
+        if verbose:
+            logger.debug(f"Using best audio-only format: {best_audio_id} - WARNING: no video")
+        return best_audio_id
+    
+    # Strategy 4: Use best video-only (fallback, will be mute)
+    if video_only:
+        video_only.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        best_video_id = video_only[0][0].get("format_id")
+        if verbose:
+            height = video_only[0][0].get("height", "unknown")
+            logger.debug(f"Using best video-only format: {best_video_id} ({height}p) - WARNING: no audio")
+        return best_video_id
+    
+    # Strategy 5: Last resort - use best available (with audio if possible)
+    if verbose:
+        logger.debug("No suitable format found, using default 'bestvideo+bestaudio/best' format")
+    return "bestvideo+bestaudio/best"
+
+
 def download_video(url, output_dir=None, verbose=False):
     """
-    Downloads video from a URL using yt-dlp.
+    Downloads video from a URL using yt-dlp with intelligent format selection.
     
     Args:
         url (str): URL to download video from
@@ -513,6 +613,7 @@ def download_video(url, output_dir=None, verbose=False):
         logger.debug(f"Starting video download from URL: {url}")
     
     import subprocess
+    import json
     
     if output_dir is None:
         output_dir = os.getcwd()
@@ -536,25 +637,87 @@ def download_video(url, output_dir=None, verbose=False):
         # Set the output path for the downloaded file
         temp_path = os.path.join(output_dir, base_filename)
 
-        # Download video using yt-dlp (best format)
-        cmd = [
-            "yt-dlp",
-            "-f", "best[ext=mp4]/best",
-            "--output", f"{temp_path}.%(ext)s",
-            url
-        ]
-        
+        # Step 1: Get available formats using --dump-json
         if verbose:
-            logger.debug(f"Running yt-dlp command: {' '.join(cmd)}")
+            logger.debug("Fetching available formats...")
         
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        
-        if verbose:
-            logger.debug("yt-dlp download completed successfully")
+        list_formats_cmd = ["yt-dlp", "--dump-json", url]
+        try:
+            result = subprocess.run(list_formats_cmd, capture_output=True, text=True, check=True)
+            video_info = json.loads(result.stdout)
+            formats = video_info.get("formats", [])
+            
+            if verbose:
+                logger.debug(f"Found {len(formats)} available formats")
+            
+            # Step 2: Select best video+audio combination
+            best_format = _select_best_format(formats, verbose, logger)
+            
+            if verbose:
+                logger.debug(f"Selected format: {best_format}")
+            
+            # Step 3: Download with the selected format
+            cmd = [
+                "yt-dlp",
+                "-f", best_format,
+                "--output", f"{temp_path}.%(ext)s",
+                url
+            ]
+            
+            if verbose:
+                logger.debug(f"Running yt-dlp command: {' '.join(cmd)}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            if verbose:
+                logger.debug("yt-dlp download completed successfully")
+            
+        except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError) as e:
+            if verbose:
+                logger.debug(f"Failed to parse formats, falling back to simple format selection: {e}")
+            
+            # Fallback: Try common format patterns
+            format_list = [
+                "bestvideo+bestaudio/best",  # Best video + best audio merged
+                "best[ext=mp4]",  # Best MP4
+                "best"  # Absolute fallback
+            ]
+            
+            downloaded = False
+            last_error = None
+            
+            for fmt in format_list:
+                cmd = [
+                    "yt-dlp",
+                    "-f", fmt,
+                    "--output", f"{temp_path}.%(ext)s",
+                    url
+                ]
+                
+                if verbose:
+                    logger.debug(f"Attempting download with format: {fmt}")
+                
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                    downloaded = True
+                    if verbose:
+                        logger.debug(f"Successfully downloaded with format: {fmt}")
+                    break
+                except subprocess.CalledProcessError as e:
+                    last_error = e.stderr
+                    if verbose:
+                        logger.debug(f"Format '{fmt}' failed: {str(e)[:200]}")
+                    continue
+            
+            if not downloaded:
+                error_msg = f"Failed to download video. Last error: {last_error}"
+                if verbose:
+                    logger.debug(error_msg)
+                raise Exception(error_msg)
         
         # Find the downloaded file
         downloaded_file = None
-        for ext in ['.mp4', '.mkv', '.webm', '.mov', '.avi']:
+        for ext in ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv', '.f4v']:
             candidate = f"{temp_path}{ext}"
             if os.path.exists(candidate):
                 downloaded_file = candidate

@@ -808,7 +808,7 @@ def embed_frames_as_base64(frames_with_timestamps, output_dir, base_name, logger
 
 def clean_combined_markdown(combine_md_path, output_dir, base_name, logger, verbose):
     """
-    Remove timestamps and image file references, keep base64 images.
+    Remove timestamps and image file references, keep embedded base64 images.
     """
     if verbose:
         logger.debug("Cleaning combined markdown...")
@@ -1069,7 +1069,6 @@ def handle_ppt_command(args):
             combined_markdown = combine_speech_and_slides(
                 speech_markdown=audio_markdown,
                 slides_markdown=slides_content,
-                logger=logger,
                 verbose=args.verbose
             )
 

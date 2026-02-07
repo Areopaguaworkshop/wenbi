@@ -427,6 +427,9 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     # Step 6: Process audio
     logger.debug("Step 4: Processing audio from video...")
     
+    # Determine if input is URL or file path
+    is_url = video_path.startswith(("http://", "https://", "www."))
+    
     params = {
         "output_dir": output_dir,
         "llm": llm,
@@ -445,8 +448,8 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     
     logger.debug("Calling process_input for audio processing...")
     result = process_input(
-        file_path=video_path,
-        url="",
+        file_path=video_path if not is_url else None,
+        url=video_path if is_url else "",
         **params
     )
     
@@ -462,6 +465,7 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     combined_markdown = combine_speech_and_slides(
         speech_markdown=audio_markdown,
         slides_markdown=ppt_content,
+        cite_timestamps=cite_timestamps,
         verbose=verbose
     )
     
@@ -469,7 +473,7 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     with open(combine_md, "w", encoding="utf-8") as f:
         f.write(combined_markdown)
     
-    logger.debug(f"Combined markdown created: {combine_md}")
+    logger.debug(f"Combined markdown created: {combine_md} (timestamps preserved)")
     
     # Step 8: Clean (if not --no-clean)
     if no_clean:
