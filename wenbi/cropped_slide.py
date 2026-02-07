@@ -352,7 +352,7 @@ def execute_cropped_slide_method(video_path, deduplicated_frames, roi_string,
         clean_combined_markdown
     )
     from wenbi.main import process_input
-    from wenbi.model import combine_speech_and_slides
+    from wenbi.ppt_slide import combine_speech_and_slides_by_timestamp
     
     if verbose:
         logger.debug("=== TYPE 2: CROPPED-SLIDE Method ===")
@@ -460,7 +460,7 @@ def execute_cropped_slide_method(video_path, deduplicated_frames, roi_string,
     with open(slides_md, "r", encoding="utf-8") as f:
         slides_content = f.read()
     
-    combined_markdown = combine_speech_and_slides(
+    combined_markdown = combine_speech_and_slides_by_timestamp(
         speech_markdown=audio_markdown,
         slides_markdown=slides_content,
         verbose=verbose

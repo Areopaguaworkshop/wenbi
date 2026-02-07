@@ -296,7 +296,6 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
         run_marker_pdf_on_image, image_to_base64, clean_combined_markdown
     )
     from wenbi.main import process_input
-    from wenbi.model import combine_speech_and_slides
     import tempfile
     import os
     
@@ -462,10 +461,9 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     with open(ppt_md, "r", encoding="utf-8") as f:
         ppt_content = f.read()
     
-    combined_markdown = combine_speech_and_slides(
+    combined_markdown = combine_speech_and_slides_by_timestamp(
         speech_markdown=audio_markdown,
         slides_markdown=ppt_content,
-        cite_timestamps=cite_timestamps,
         verbose=verbose
     )
     
@@ -488,3 +486,182 @@ def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
     
     logger.debug("=== PPT Method Complete ===")
     return combine_md, combine_clean_md
+
+
+def parse_time_to_seconds(time_str: str) -> int:
+    """
+    Convert HH:MM:SS to seconds
+    """
+    try:
+        parts = time_str.split(':')
+        if len(parts) == 3:
+            hours, minutes, seconds = map(float, parts)
+            return int(hours * 3600 + minutes * 60 + seconds)
+        return 0
+    except:
+        return 0
+
+
+def combine_speech_and_slides_by_timestamp(speech_markdown: str, slides_markdown: str, verbose: bool = False) -> str:
+    """
+    Combine speech and slides markdown based on timestamp alignment.
+    Preserves all timestamps exactly as they appear.
+    
+    Args:
+        speech_markdown: Content from _rewritten.md with headers like "### **00:00:00 - 00:00:41**"
+        slides_markdown: Content from _slides.md with headers like "### **00:00:00**"
+        verbose: Enable verbose logging
+    
+    Returns:
+        Combined markdown with slides inserted before matching speech sections
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if verbose:
+        logger.debug("=== Starting Timestamp-Based Speech and Slides Combination ===")
+    
+    # Parse speech sections
+    speech_sections = []
+    lines = speech_markdown.split('\n')
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Look for speech section headers
+        if line.startswith('### **') and line.endswith('**') and ' - ' in line:
+            header = line
+            # Extract start time from header
+            time_range = line.replace('### **', '').replace('**', '')
+            if ' - ' in time_range:
+                start_time_str = time_range.split(' - ')[0]
+                start_time_seconds = parse_time_to_seconds(start_time_str)
+                
+                # Collect content until next header or end
+                content_lines = []
+                i += 1
+                while i < len(lines):
+                    next_line = lines[i].strip()
+                    if next_line.startswith('### **') and next_line.endswith('**') and ' - ' in next_line:
+                        break
+                    content_lines.append(lines[i])
+                    i += 1
+                
+                content = '\n'.join(content_lines)
+                
+                speech_sections.append({
+                    'header': header,
+                    'start_time': start_time_seconds,
+                    'content': content
+                })
+                continue
+        
+        i += 1
+    
+    # Parse slides sections
+    slide_sections = []
+    lines = slides_markdown.split('\n')
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Look for slide headers
+        if line.startswith('### **') and line.endswith('**'):
+            start_timestamp = line.replace('### **', '').replace('**', '')
+            
+            # Find next slide's timestamp to determine range
+            next_timestamp = None
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                if next_line.startswith('### **') and next_line.endswith('**'):
+                    next_timestamp = next_line.replace('### **', '').replace('**', '')
+                    break
+                j += 1
+            
+            # Collect content from this slide until next slide header
+            content_lines = []
+            i += 1
+            while i < len(lines):
+                next_line = lines[i].strip()
+                if next_line.startswith('### **') and next_line.endswith('**'):
+                    break
+                content_lines.append(lines[i])
+                i += 1
+            
+            content = '\n'.join(content_lines)
+            
+            slide_sections.append({
+                'start_timestamp': start_timestamp,
+                'start_seconds': parse_time_to_seconds(start_timestamp),
+                'end_timestamp': next_timestamp,
+                'content': content
+            })
+            continue
+        
+        i += 1
+    
+    if verbose:
+        logger.debug(f"Parsed {len(speech_sections)} speech sections and {len(slide_sections)} slide sections")
+    
+    # Build combined content
+    combined_lines = []
+    speech_idx = 0
+    used_slides = set()
+    
+    # For each speech section, find and insert slides before it
+    for speech_idx, speech_section in enumerate(speech_sections):
+        speech_start_time = speech_section['start_time']
+        speech_end_time = speech_sections[speech_idx + 1]['start_time'] if speech_idx + 1 < len(speech_sections) else float('inf')
+        
+        # Find slides that should be placed before this speech section
+        slides_to_insert = []
+        for slide_idx, slide in enumerate(slide_sections):
+            if slide_idx in used_slides:
+                continue
+                
+            slide_time = slide['start_seconds']
+            
+            # Insert slide if its timestamp falls within this speech section's time range
+            # OR if it falls exactly at the boundary of this section
+            if (slide_time >= speech_start_time and 
+                (slide_time < speech_end_time or (speech_idx == len(speech_sections) - 1))):
+                slides_to_insert.append(slide)
+                used_slides.add(slide_idx)
+        
+        # Sort slides by timestamp
+        slides_to_insert.sort(key=lambda x: x['start_seconds'])
+        
+        # Insert slides before this speech section
+        for slide in slides_to_insert:
+            if verbose:
+                logger.debug(f"Inserting slide {slide['start_timestamp']} before speech section {speech_section['header']}")
+            
+            combined_lines.append(f"\n### **{slide['start_timestamp']}**\n")
+            combined_lines.append(slide['content'])
+            combined_lines.append("")  # Blank line separator
+        
+        # Insert speech section
+        combined_lines.append(f"\n{speech_section['header']}\n")
+        combined_lines.append(speech_section['content'])
+        combined_lines.append("")  # Blank line separator
+    
+    # Add any remaining slides that weren't inserted (edge case: slides after last speech section)
+    remaining_slides = [slide for i, slide in enumerate(slide_sections) if i not in used_slides]
+    if remaining_slides:
+        if verbose:
+            logger.debug(f"Adding {len(remaining_slides)} remaining slides after all speech sections")
+        
+        for slide in remaining_slides:
+            combined_lines.append(f"\n### **{slide['start_timestamp']}**\n")
+            combined_lines.append(slide['content'])
+            combined_lines.append("")
+    
+    result = '\n'.join(combined_lines).strip()
+    
+    if verbose:
+        logger.debug("=== Timestamp-Based Combination Completed ===")
+    
+    return result

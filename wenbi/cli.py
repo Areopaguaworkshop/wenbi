@@ -11,13 +11,13 @@ from wenbi.gui import launch_gui
 from wenbi.main import process_input
 from wenbi.model import (
     academic,
-    combine_speech_and_slides,
     combine_speech_and_slides_enhanced,
     convert_slides_to_markdown,
     read_markdown_file,
     rewrite,
     translate,
 )
+from wenbi.ppt_slide import combine_speech_and_slides_by_timestamp
 
 
 def setup_logging(verbose=False):
@@ -1066,7 +1066,7 @@ def handle_ppt_command(args):
             with open(slides_md, "r", encoding="utf-8") as f:
                 slides_content = f.read()
 
-            combined_markdown = combine_speech_and_slides(
+            combined_markdown = combine_speech_and_slides_by_timestamp(
                 speech_markdown=audio_markdown,
                 slides_markdown=slides_content,
                 verbose=args.verbose
@@ -2082,15 +2082,9 @@ def parse_time_to_seconds(time_str):
         else:
             if args.verbose:
                 logger.debug("Using original LLM-based alignment")
-            combined_markdown = combine_speech_and_slides(
-                speech_markdown,
-                slides_markdown,
-                llm=params["llm"],
-                output_dir=output_dir,
-                cite_timestamps=params["cite_timestamps"],
-                max_tokens=params["max_tokens"],
-                timeout=params["timeout"],
-                temperature=params["temperature"],
+            combined_markdown = combine_speech_and_slides_by_timestamp(
+                speech_markdown=speech_markdown,
+                slides_markdown=slides_markdown,
                 verbose=args.verbose,
             )
 
