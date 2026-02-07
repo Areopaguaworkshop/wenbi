@@ -272,25 +272,48 @@ def rewrite(
                          i}/{len(chunks)} ({len(chunk)} characters)")
 
         try:
-            # Skip timestamp headers when cite_timestamps is True
-            is_timestamp_header = chunk.strip().startswith(
-                "### **"
-            ) and chunk.strip().endswith("**")
-
-            if cite_timestamps and is_timestamp_header:
-                if verbose:
-                    logger.debug(
-                        f"Preserving timestamp header: {chunk.strip()[:50]}..."
-                    )
+            # Check if chunk contains a timestamp header when cite_timestamps is True
+            timestamp_header = None
+            content_to_rewrite = chunk
+            
+            if cite_timestamps:
+                # Extract timestamp header if present (format: ### **timestamp**)
+                lines = chunk.split('\n', 1)
+                first_line = lines[0].strip()
+                
+                if first_line.startswith("### **") and first_line.endswith("**"):
+                    timestamp_header = first_line
+                    # Content is everything after the first line
+                    content_to_rewrite = lines[1] if len(lines) > 1 else ""
+                    
+                    if verbose:
+                        logger.debug(
+                            f"Extracted timestamp header: {timestamp_header}"
+                        )
+            
+            # Skip rewriting if only timestamp header exists with no content
+            if not content_to_rewrite.strip():
                 rewritten_chunks.append(chunk)
-            else:
-                result = rewrite_module(
-                    oral_text=chunk, target_language=rewrite_language
-                )
-                rewritten_chunks.append(result.written_text)
-
                 if verbose:
-                    logger.debug(f"Chunk {i} rewritten successfully")
+                    logger.debug(f"Chunk {i} contains only timestamp header, skipping rewrite")
+                continue
+            
+            # Rewrite the content
+            result = rewrite_module(
+                oral_text=content_to_rewrite, target_language=rewrite_language
+            )
+            rewritten_content = result.written_text
+            
+            # Reconstruct chunk with timestamp header if it was extracted
+            if cite_timestamps and timestamp_header:
+                rewritten_chunk = f"{timestamp_header}\n\n{rewritten_content}"
+            else:
+                rewritten_chunk = rewritten_content
+            
+            rewritten_chunks.append(rewritten_chunk)
+
+            if verbose:
+                logger.debug(f"Chunk {i} rewritten successfully")
 
         except Exception as e:
             error_msg = f"Error rewriting chunk {i}: {e}"
