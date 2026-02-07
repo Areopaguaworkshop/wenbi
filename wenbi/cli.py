@@ -10,7 +10,6 @@ from wenbi.download import download_all
 from wenbi.gui import launch_gui
 from wenbi.main import process_input
 from wenbi.model import (
-    academic,
     rewrite,
     translate,
 )
@@ -294,6 +293,8 @@ def handle_rewrite_command(args):
         logger.debug("Starting rewrite command")
         logger.debug(f"Input: {args.input}")
 
+    style = getattr(args, "style", "rewrite")
+
     # Validate transcription arguments
     validate_transcription_args(args)
 
@@ -309,7 +310,7 @@ def handle_rewrite_command(args):
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
         "lang": args.lang or config.get("lang", "Chinese"),
-        "subcommand": "rewrite",
+        "subcommand": "academic" if style == "academic" else "rewrite",
         "transcribe_model": args.transcribe_model
         or config.get("transcribe_model", "large-v3"),
         "multi_language": args.multi_language or config.get("multi_language", False),
@@ -342,10 +343,20 @@ def handle_rewrite_command(args):
     )
 
     if result[0] and not result[0].startswith("Error"):
-        print("Rewrite completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the rewritten text in:", result[1])
+        if style == "academic":
+            output_dir = params["output_dir"] or os.getcwd()
+            base_name = result[3] or os.path.splitext(os.path.basename(args.input))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_academic.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(result[0])
+            print("Academic rewriting completed successfully!")
+            print("Output file:", output_file)
+            print("You can find the academic text in:", output_file)
+        else:
+            print("Rewrite completed successfully!")
+            print("Output file:", result[1] if result[1] else "Text output only")
+            if result[1]:
+                print("You can find the rewritten text in:", result[1])
     else:
         print("Error:", result[0])
 
@@ -410,70 +421,6 @@ def handle_translate_command(args):
         print("Output file:", result[1] if result[1] else "Text output only")
         if result[1]:
             print("You can find the translated text in:", result[1])
-    else:
-        print("Error:", result[0])
-
-
-def handle_academic_command(args):
-    """Handle the academic subcommand"""
-    logger = setup_logging(args.verbose)
-
-    if args.verbose:
-        logger.debug("Starting academic command")
-        logger.debug(f"Input: {args.input}")
-
-    # Validate transcription arguments
-    validate_transcription_args(args)
-
-    # Load config if provided
-    config = load_config(args.config)
-
-    # Prepare parameters
-    params = {
-        "output_dir": args.output_dir or config.get("output_dir", ""),
-        "llm": args.llm or config.get("llm", ""),
-        "chunk_length": args.chunk_length or config.get("chunk_length", 20),
-        "max_tokens": args.max_tokens or config.get("max_tokens", 130000),
-        "timeout": args.timeout or config.get("timeout", 3600),
-        "temperature": args.temperature or config.get("temperature", 0.1),
-        "lang": args.lang or config.get("lang", "English"),
-        "subcommand": "academic",
-        "transcribe_model": args.transcribe_model
-        or config.get("transcribe_model", "large-v3"),
-        "multi_language": args.multi_language or config.get("multi_language", False),
-        "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
-        "output_wav": args.output_wav or config.get("output_wav", ""),
-        "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
-        "verbose": args.verbose,
-    }
-
-    if args.verbose:
-        logger.debug("Configuration:")
-        for key, value in params.items():
-            if key != "verbose":
-                logger.debug(f"  {key}: {value}")
-
-    # Handle timestamp parameters
-    if args.start_time and args.end_time:
-        params["timestamp"] = parse_timestamp(args.start_time, args.end_time)
-        if args.verbose:
-            logger.debug(
-                f"Processing timestamp segment: {args.start_time} - {args.end_time}"
-            )
-    else:
-        params["timestamp"] = None
-
-    # Use the new process_input function that handles all file types
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input, args.input if is_url else "", **params
-    )
-
-    if result[0] and not result[0].startswith("Error"):
-        print("Academic rewriting completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the academic text in:", result[1])
     else:
         print("Error:", result[0])
 
@@ -1663,7 +1610,7 @@ def main():
     print("Debug: download_all completed")
 
     # Check if this is a subcommand
-    subcommands = ["rewrite", "rw", "translate", "tr", "academic", "ac", "ppt", "p"]
+    subcommands = ["rewrite", "rw", "translate", "tr", "ppt", "p"]
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
     print(f"Debug: sys.argv = {sys.argv}")
     print(f"Debug: is_subcommand = {is_subcommand}")
@@ -1684,6 +1631,12 @@ def main():
             "rewrite", aliases=["rw"], help="Rewrite text"
         )
         add_global_args(rewrite_parser)
+        rewrite_parser.add_argument(
+            "--style",
+            choices=["rewrite", "academic"],
+            default="rewrite",
+            help="Rewrite style: rewrite (default) or academic",
+        )
         rewrite_parser.set_defaults(func=handle_rewrite_command)
 
         # Translate subcommand
@@ -1692,13 +1645,6 @@ def main():
         )
         add_global_args(translate_parser)
         translate_parser.set_defaults(func=handle_translate_command)
-
-        # Academic subcommand
-        academic_parser = subparsers.add_parser(
-            "academic", aliases=["ac"], help="Academic rewriting"
-        )
-        add_global_args(academic_parser)
-        academic_parser.set_defaults(func=handle_academic_command)
 
         # PPT subcommand - extract slides from video and combine with speech
         ppt_parser = subparsers.add_parser(
@@ -1805,7 +1751,7 @@ def main():
 
     # Main command (direct file processing)
     parser = argparse.ArgumentParser(
-        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), academic (ac), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
+        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
     )
     parser.add_argument(
         "input", nargs="?", default="", help="Path to input file or URL"
