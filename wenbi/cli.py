@@ -770,10 +770,14 @@ def clean_combined_markdown(combine_md_path, output_dir, base_name, logger, verb
     with open(combine_md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Remove timestamp headers (### **HH:MM:SS**)
+    # Remove timestamp headers (### **HH:MM:SS** or ### **HH:MM:SS - HH:MM:SS**)
     import re
 
-    content = re.sub(r"\n### \*\*\d{2}:\d{2}:\d{2}\*\*\n", "\n", content)
+    content = re.sub(
+        r"\n### \*\*\d{2}:\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2}:\d{2})?\*\*\n",
+        "\n",
+        content,
+    )
 
     # Remove image file references ![slide](/path/to/image.png)
     # but keep <img src="data:image/png;base64,..."/>
