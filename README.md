@@ -52,13 +52,13 @@ Wenbi is a revolutionary CLI tool and web application that **focuses on media-to
 wenbi lecture_recording.mp4 --llm gemini/gemini-2.0-flash --cite-timestamps --output-dir ./course_notes
 
 # Convert research interview to academic paper format
-wenbi interview.mp3 academic --llm openai/gpt-4o --lang English
+wenbi interview.mp3 rewrite --style academic --llm openai/gpt-4o --lang English
 ```
 
 ### 📚 **Content Creation**
 ```bash
 # Turn podcast episodes into blog posts
-wenbi podcast_episode.mp3 rewrite --llm ollama/qwen3 --lang English --chunk-length 6
+wenbi rewrite podcast_episode.mp3 --llm ollama/qwen3 --lang English --chunk-length 6
 
 # Process YouTube educational content for documentation
 wenbi "https://youtube.com/watch?v=example" --llm gemini/gemini-1.5-flash --cite-timestamps
@@ -160,7 +160,7 @@ wenbi https://www.youtube.com/watch?v=dQw4w9WgXcQ --llm gemini/gemini-1.5-flash 
 wenbi subtitles.vtt --output-dir ./output --lang English
 
 # Example: Process a DOCX file for academic rewriting (requires --llm)
-wenbi document.docx --llm ollama/qwen3 --lang English
+wenbi rewrite document.docx --style academic --llm ollama/qwen3 --lang English
 ```
 
 **Common Options:**
@@ -172,11 +172,11 @@ wenbi document.docx --llm ollama/qwen3 --lang English
 *   `-s, --transcribe-lang <language>`: Language for transcription (e.g., `Chinese`, `English`).
 *   `-l, --lang <language>`: Target language for translation/rewriting (default: `Chinese`).
 *   `-m, --multi-language`: Enable multi-language processing.
-*   `-cl, --chunk-length <int>`: Number of sentences per paragraph (default: 8).
+*   `-cl, --chunk-length <int>`: Number of sentences per paragraph (default: 20).
 *   `-mt, --max-tokens <int>`: Maximum tokens for LLM output (default: 130000).
 *   `-to, --timeout <int>`: LLM request timeout in seconds (default: 3600).
 *   `-tm, --temperature <float>`: LLM temperature parameter (default: 0.1).
-*   `-tsm, --transcribe-model <model_size>`: Whisper model size for transcription (e.g., `large-v3-turbo`).
+*   `-tsm, --transcribe-model <model_size>`: Whisper model size for transcription (e.g., `large-v3`).
 *   `-ow, --output_wav <filename>`: Filename for saving the segmented WAV (optional).
 *   `-st, --start_time <HH:MM:SS>`: Start time for extraction from media.
 *   `-et, --end_time <HH:MM:SS>`: End time for extraction from media.
@@ -189,70 +189,67 @@ Wenbi provides specific subcommands for different processing tasks:
 # Rewrite text (oral → written)
 wenbi rewrite <input_file> --llm ollama/qwen3 --lang Chinese
 
+# Academic rewriting for scholarly style
+wenbi rewrite <input_file> --style academic --llm openai/gpt-4o --lang English
+
 # Translate text to target language
 wenbi translate <input_file> --llm gemini/gemini-1.5-flash --lang French
 
-# Academic rewriting for scholarly style
-wenbi academic <input_file> --llm openai/gpt-4o --lang English
-
-# NEW: Combine speech with presentation slides
-wenbi ppt <speech_input> <slides_file> --llm ollama/qwen3 --lang English
-# (abbreviated: wenbi p <speech_input> <slides_file>)
+# Combine speech with presentation slides (video-based)
+wenbi ppt <video_or_audio_or_url> --llm ollama/qwen3 --lang English
+# (abbreviated: wenbi p <video_or_audio_or_url>)
 ```
 
-**PPT Subcommand**: The new `ppt` subcommand intelligently combines speech with presentation slides:
-- Accepts **any speech format**: video, audio, URL, or markdown file
-- Accepts **any slides format**: PDF, PPTX, or markdown file
-- **Skips redundant processing**: Uses markdown files directly if provided (no re-transcription/conversion)
-- Transcribes and rewrites media files using full rewrite subcommand
-- Converts PDF/PPTX slides to markdown using marker-pdf
-- Uses LLM-based alignment to find where each slide appears in the speech
-- Inserts slides before matching speech sections for seamless integration
-- Perfect for lectures, conferences, and educational content
+**PPT Subcommand**: The `ppt` subcommand combines speech with slides from video:
+- Accepts **video/audio/URL** input
+- Supports **3 slide extraction modes**:
+  - default frame method
+  - `--cropped-slide` for RTDETR ROI extraction
+  - `--ppt` for PDF/PPT/PPTX/image matching
+- Transcribes and rewrites speech using the rewrite pipeline
+- Always includes timestamp headers in speech output (needed for alignment)
+- Inserts slides before matching speech sections by **timestamp alignment**
+- Outputs combined markdown and a cleaned version unless `--no-clean`
 
 Examples:
 ```bash
 # Merge lecture recording with presentation slides
-wenbi ppt lecture.mp4 presentation.pdf \
+wenbi ppt lecture.mp4 --ppt presentation.pdf \
   --llm gemini/gemini-1.5-flash \
   --lang English \
-  --cite-timestamps \
   --output-dir ./lecture_notes
 
-# Use existing markdown files (no reprocessing)
-wenbi ppt speech.md slides.md \
-  --llm ollama/qwen3 \
-  --output-dir ./output
-
-# Mix media and markdown (transcribe video, use slides markdown)
-wenbi ppt lecture.mp4 slides.md \
+# Auto slide extraction from video frames
+wenbi ppt lecture.mp4 \
   --lang English \
   --output-dir ./notes
 ```
 
 Subcommands share common options with the main command.
 
+**Note:** `wenbi rewrite --style academic` writes `{basename}_academic.md`.
+
 #### **🎥 Advanced Video Slides Extraction**
 
-The PPT subcommand intelligently extracts slides directly from video presentations with a sophisticated multi-phase workflow:
+The PPT subcommand extracts slides directly from video presentations with a multi-phase workflow:
 
 **Workflow Phases:**
 1. **Frame Extraction**: Extracts frames at regular intervals (default: every 60 seconds)
 2. **ROI Detection**: Detects slide region using hybrid OpenCV methods
 3. **Slide Cropping**: Isolates slide content from background/UI
 4. **Deduplication**: Removes duplicate slides using SSIM image comparison (default: 0.98 threshold)
-5. **OCR Processing**: Extracts text from unique slides using marker-pdf
-6. **Speech Transcription**: Transcribes full video audio (parallel process)
+5. **OCR Processing**: Extracts text from unique slides using marker-pdf (unless `--no-ocr`)
+6. **Speech Transcription**: Transcribes full video audio
 7. **Merge**: Combines slides with speech by timestamp alignment
 
 **Quick Examples:**
 
 ```bash
 # Automatic slide detection with default settings
-wenbi ppt lecture.mp4 --cite-timestamps
+wenbi ppt lecture.mp4
 
 # Custom frame extraction interval (every 2 minutes)
-wenbi ppt lecture.mp4 --frame-interval 120 --cite-timestamps
+wenbi ppt lecture.mp4 --frame-interval 120
 
 # Manual ROI override (skip auto-detection)
 wenbi ppt lecture.mp4 --roi "100,50,1660,850"
@@ -269,7 +266,6 @@ wenbi ppt lecture.mp4 \
   --ssim-threshold 0.95 \
   --llm gemini/gemini-1.5-flash \
   --lang English \
-  --cite-timestamps \
   --output-dir ./lecture_notes
 ```
 
@@ -280,7 +276,11 @@ wenbi ppt lecture.mp4 \
 - `--each-roi`: Enable per-frame ROI detection instead of single ROI
 - `--ssim-threshold F`: SSIM threshold for deduplication (default: 0.98, range: 0.0-1.0)
 - `--hist-threshold F`: Histogram correlation threshold (default: 0.15, range: 0.0-1.0)
-- `--max-slides N`: Maximum slides to extract (default: 100)
+- `--max-slides N`: Maximum slides to extract (default: 20)
+- `--cropped-slide [auto|x0,y0,x1,y1]`: RTDETR-based slide cropping (optional ROI)
+- `--ppt <path>`: Use PDF/PPT/PPTX/image matching for slides
+- `--no-ocr`: Skip OCR and embed slide images as base64
+- `--no-clean`: Keep timestamps and image references in final output
 
 **Detection Algorithm:**
 The hybrid detection combines multiple OpenCV techniques for robust slide boundary detection:
@@ -294,10 +294,12 @@ The hybrid detection combines multiple OpenCV techniques for robust slide bounda
 ```
 output_dir/
 ├── _extracted_frames/          # All extracted frames
-├── {basename}_slides/          # Cropped slide images
-├── {basename}_slide.md         # Extracted slide content with OCR
-├── {basename}_rewritten.md     # Transcribed & rewritten speech
-└── {basename}_combined.md      # Final integrated document
+├── {basename}_slides/          # Cropped slide images (when applicable)
+├── {basename}_slides.md        # Extracted slide content with OCR (frame method)
+├── {basename}_ppt.md           # Extracted slide content (PPT/PDF matching)
+├── {basename}_rewritten.md     # Transcribed & rewritten speech (timestamped)
+├── {basename}_combine.md       # Final integrated document
+└── {basename}_combine_clean.md # Cleaned output (unless --no-clean)
 ```
 
 **Use Cases:**
