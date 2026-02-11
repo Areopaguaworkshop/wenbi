@@ -1,15 +1,15 @@
-from wenbi.utils import (
-    transcribe,
-    parse_subtitle,
-    extract_audio_segment,  # replace video_to_audio with extract_audio_segment
-    language_detect,
-    download_audio,
-)
-from wenbi.model import rewrite, translate, process_docx, academic
+import logging
 import os
 import sys
-import dspy
-import logging
+
+from wenbi.model import academic, process_docx, rewrite, translate
+from wenbi.utils import (
+    download_audio,
+    extract_audio_segment,  # replace video_to_audio with extract_audio_segment
+    language_detect,
+    parse_subtitle,
+    transcribe,
+)
 
 # Only use package-relative output dir for web interface
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
@@ -22,12 +22,21 @@ def is_video_audio_or_url(file_path, url):
     """Check if input is video, audio, or URL"""
     if url.strip():
         return True
-    
+
     if file_path:
-        video_extensions = ('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')
-        audio_extensions = ('.mp3', '.flac', '.aac', '.ogg', '.m4a', '.opus')
+        video_extensions = (
+            ".mp4",
+            ".avi",
+            ".mov",
+            ".mkv",
+            ".flv",
+            ".wmv",
+            ".m4v",
+            ".webm",
+        )
+        audio_extensions = (".mp3", ".flac", ".aac", ".ogg", ".m4a", ".opus")
         return file_path.lower().endswith(video_extensions + audio_extensions)
-    
+
     return False
 
 
@@ -35,8 +44,19 @@ def is_text_file(file_path):
     """Check if input is VTT, markdown, or docx file"""
     if not file_path:
         return False
-    
-    text_extensions = ('.vtt', '.srt', '.ass', '.ssa', '.sub', '.smi', '.txt', '.md', '.markdown', '.docx')
+
+    text_extensions = (
+        ".vtt",
+        ".srt",
+        ".ass",
+        ".ssa",
+        ".sub",
+        ".smi",
+        ".txt",
+        ".md",
+        ".markdown",
+        ".docx",
+    )
     return file_path.lower().endswith(text_extensions)
 
 
@@ -58,13 +78,16 @@ def process_input(
     subcommand=None,  # New parameter to specify which subcommand to use
     cite_timestamps=False,  # New parameter for timestamp citation
     verbose=False,  # New parameter for verbose logging
+    use_deepl=True,  # Use DeepL for translation
+    deepl_key=None,  # DeepL API key
+    keep_original_lang=False,  # Keep original language alongside translation
 ):
     """Process input with logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
     2. If input is VTT/markdown/docx: directly process with subcommand
     """
     logger = logging.getLogger(__name__)
-    
+
     if verbose:
         logger.debug("=== Starting process_input ===")
         logger.debug(f"Input file: {file_path}")
@@ -95,16 +118,39 @@ def process_input(
             if url:
                 if verbose:
                     logger.debug(f"Downloading from URL: {url}")
-                file_path = download_audio(url.strip(), output_dir=out_dir, timestamp=timestamp, output_wav=output_wav)
+                file_path = download_audio(
+                    url.strip(),
+                    output_dir=out_dir,
+                    timestamp=timestamp,
+                    output_wav=output_wav,
+                )
                 if verbose:
                     logger.debug(f"Downloaded file: {file_path}")
             elif file_path:
                 # Use extract_audio_segment for all audio/video files except .wav
-                if file_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v',
-                                             '.mp3', '.flac', '.aac', '.ogg', '.m4a', '.webm', '.opus')):
+                if file_path.lower().endswith(
+                    (
+                        ".mp4",
+                        ".avi",
+                        ".mov",
+                        ".mkv",
+                        ".flv",
+                        ".wmv",
+                        ".m4v",
+                        ".mp3",
+                        ".flac",
+                        ".aac",
+                        ".ogg",
+                        ".m4a",
+                        ".webm",
+                        ".opus",
+                    )
+                ):
                     if verbose:
                         logger.debug(f"Extracting audio segment from: {file_path}")
-                    file_path = extract_audio_segment(file_path, timestamp, out_dir, output_wav=output_wav)
+                    file_path = extract_audio_segment(
+                        file_path, timestamp, out_dir, output_wav=output_wav
+                    )
                     if verbose:
                         logger.debug(f"Extracted WAV: {file_path}")
                 # If .wav, do nothing (already correct format)
@@ -119,7 +165,7 @@ def process_input(
             if multi_language:
                 if verbose:
                     logger.debug("Using multi-language transcription")
-                from wenbi.mutilang import transcribe_multi_speaker, speaker_vtt
+                from wenbi.mutilang import speaker_vtt, transcribe_multi_speaker
 
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 if verbose:
@@ -136,7 +182,9 @@ def process_input(
                     logger.debug(f"Generated VTT files for {len(vtt_files)} speakers")
             else:
                 if verbose:
-                    logger.debug(f"Running single-language transcription (model: {transcribe_model})")
+                    logger.debug(
+                        f"Running single-language transcription (model: {transcribe_model})"
+                    )
                 lang_code = transcribe_lang if transcribe_lang.strip() else None
                 if verbose and lang_code:
                     logger.debug(f"Transcription language: {lang_code}")
@@ -164,11 +212,13 @@ def process_input(
             for speaker, vtt_file in vtt_files.items():
                 try:
                     if verbose:
-                        logger.debug(f"Processing VTT for {speaker or 'default speaker'}")
+                        logger.debug(
+                            f"Processing VTT for {speaker or 'default speaker'}"
+                        )
                     if subcommand == "translate":
                         if verbose:
                             logger.debug(f"Translating to {lang}...")
-                        result = translate(
+                        translated_text = translate(
                             vtt_file,
                             output_dir=out_dir,
                             translate_language=lang,
@@ -178,13 +228,25 @@ def process_input(
                             timeout=timeout,
                             temperature=temperature,
                             cite_timestamps=cite_timestamps,
+                            use_deepl=use_deepl,
+                            deepl_key=deepl_key,
+                            keep_original_lang=keep_original_lang,
+                            verbose=verbose,
                         )
+                        # Save to output file
+                        base_name = os.path.splitext(os.path.basename(vtt_file))[0]
+                        output_file = os.path.join(
+                            out_dir, f"{base_name}_translated.md"
+                        )
+                        with open(output_file, "w", encoding="utf-8") as f:
+                            f.write(translated_text)
+                        result = (translated_text, output_file)
                     elif subcommand == "rewrite":
                         if verbose:
                             logger.debug(f"Rewriting in {lang}...")
 
                         rewrite_text, rewrite_file = rewrite(
-vtt_file,
+                            vtt_file,
                             output_dir=out_dir,
                             llm=llm,
                             rewrite_language=lang,
@@ -193,7 +255,6 @@ vtt_file,
                             timeout=timeout,
                             temperature=temperature,
                             cite_timestamps=cite_timestamps,
-
                         )
                         if verbose:
                             logger.debug(f"Rewrite completed: {rewrite_file}")
@@ -217,13 +278,18 @@ vtt_file,
                             logger.debug(f"Academic processing completed")
                     else:
                         result = "Error: Unknown subcommand"
-                    
+
                     final_outputs[speaker if speaker else "output"] = result
                 except Exception as e:
                     print(f"Error processing VTT with {subcommand}: {e}")
                     if verbose:
                         logger.exception(f"Error details for {subcommand}:")
-                    return f"Error: Failed during {subcommand} processing", None, None, None
+                    return (
+                        f"Error: Failed during {subcommand} processing",
+                        None,
+                        None,
+                        None,
+                    )
 
             if multi_language:
                 return final_outputs
@@ -233,19 +299,29 @@ vtt_file,
                 # Handle tuple result format for rewrite
 
                 if isinstance(result, tuple) and len(result) == 2:
-
                     text_content, file_path = result
 
                     return text_content, file_path, None, base_name
 
                 else:
-
                     return result, result, None, base_name
         else:
             # Original behavior for backward compatibility
             if verbose:
-                logger.debug("No subcommand specified, using original VTT processing logic")
-            return _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language)
+                logger.debug(
+                    "No subcommand specified, using original VTT processing logic"
+                )
+            return _process_vtt_original_logic(
+                vtt_files,
+                out_dir,
+                lang,
+                llm,
+                chunk_length,
+                max_tokens,
+                timeout,
+                temperature,
+                multi_language,
+            )
 
     # Check if input is text file (VTT, markdown, docx)
     elif is_text_file(file_path):
@@ -253,7 +329,7 @@ vtt_file,
             # Process text file directly with subcommand
             try:
                 if subcommand == "translate":
-                    result = translate(
+                    translated_text = translate(
                         file_path,
                         output_dir=out_dir,
                         translate_language=lang,
@@ -263,11 +339,20 @@ vtt_file,
                         timeout=timeout,
                         temperature=temperature,
                         cite_timestamps=cite_timestamps,
+                        use_deepl=use_deepl,
+                        deepl_key=deepl_key,
+                        keep_original_lang=keep_original_lang,
+                        verbose=verbose,
                     )
+                    # Save to output file
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    output_file = os.path.join(out_dir, f"{base_name}_translated.md")
+                    with open(output_file, "w", encoding="utf-8") as f:
+                        f.write(translated_text)
+                    result = (translated_text, output_file)
                 elif subcommand == "rewrite":
-
                     rewrite_text, rewrite_file = rewrite(
-file_path,
+                        file_path,
                         output_dir=out_dir,
                         llm=llm,
                         rewrite_language=lang,
@@ -276,7 +361,6 @@ file_path,
                         timeout=timeout,
                         temperature=temperature,
                         cite_timestamps=cite_timestamps,
-
                     )
 
                     result = (rewrite_text, rewrite_file)
@@ -294,34 +378,51 @@ file_path,
                     )
                 else:
                     return "Error: Unknown subcommand", None, None, None
-                
+
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 # Handle tuple result format for rewrite
 
                 if isinstance(result, tuple) and len(result) == 2:
-
                     text_content, file_path = result
 
                     return text_content, file_path, None, base_name
 
                 else:
-
                     return result, result, None, base_name
             except Exception as e:
                 print(f"Error processing text file with {subcommand}: {e}")
                 return f"Error: Failed during {subcommand} processing", None, None, None
         else:
             # Original behavior for backward compatibility
-            return _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature)
-    
+            return _process_text_file_original_logic(
+                file_path,
+                out_dir,
+                lang,
+                llm,
+                chunk_length,
+                max_tokens,
+                timeout,
+                temperature,
+            )
+
     else:
         return "Error: Unsupported file type", None, None, None
 
 
-def _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature, multi_language):
+def _process_vtt_original_logic(
+    vtt_files,
+    out_dir,
+    lang,
+    llm,
+    chunk_length,
+    max_tokens,
+    timeout,
+    temperature,
+    multi_language,
+):
     """Original VTT processing logic for backward compatibility"""
     final_outputs = {}
-    
+
     # Defensive: handle both dict and list (or single file)
     if isinstance(vtt_files, dict):
         vtt_iter = vtt_files.items()
@@ -335,9 +436,7 @@ def _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max
         if not multi_language:
             base_name = os.path.splitext(os.path.basename(vtt_file))[0]
             csv_file = os.path.join(out_dir, f"{base_name}.csv")
-            parse_subtitle(vtt_file).to_csv(
-                csv_file, index=True, encoding="utf-8"
-            )
+            parse_subtitle(vtt_file).to_csv(csv_file, index=True, encoding="utf-8")
             print(f"CSV file '{csv_file}' created successfully.")
 
         detected_lang = language_detect(vtt_file)
@@ -347,7 +446,7 @@ def _process_vtt_original_logic(vtt_files, out_dir, lang, llm, chunk_length, max
         if detected_lang == "zh" and lang.lower() == "chinese":
             # Use rewrite for Chinese to Chinese translation/rewriting
             rewrite_text, rewrite_file = rewrite(
-vtt_file,
+                vtt_file,
                 output_dir=out_dir,
                 llm=llm,
                 rewrite_language=lang,
@@ -355,13 +454,12 @@ vtt_file,
                 max_tokens=max_tokens,
                 timeout=timeout,
                 temperature=temperature,
-
             )
 
             output = (rewrite_text, rewrite_file)
         else:
             # Use translate for other languages or when target is not Chinese
-            output = translate(
+            translated_text = translate(
                 vtt_file,
                 output_dir=out_dir,
                 translate_language=lang,
@@ -371,6 +469,12 @@ vtt_file,
                 timeout=timeout,
                 temperature=temperature,
             )
+            # Save to output file
+            base_name = os.path.splitext(os.path.basename(vtt_file))[0]
+            output_file = os.path.join(out_dir, f"{base_name}_translated.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(translated_text)
+            output = (translated_text, output_file)
         final_outputs[speaker if speaker else "output"] = output
 
     if multi_language:
@@ -380,21 +484,21 @@ vtt_file,
         # Handle tuple result format for rewrite
 
         if isinstance(result, tuple) and len(result) == 2:
-
             text_content, file_path = result
 
             return text_content, file_path, csv_file, base_name
 
         else:
-
             return result, result, csv_file, base_name
 
 
-def _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature):
+def _process_text_file_original_logic(
+    file_path, out_dir, lang, llm, chunk_length, max_tokens, timeout, temperature
+):
     """Original text file processing logic for backward compatibility"""
     # If llm is provided and it's intended for academic processing,
     # and the input is a text file, go directly to academic processing.
-    if llm and file_path.lower().endswith(('.docx', '.txt', '.md')):
+    if llm and file_path.lower().endswith((".docx", ".txt", ".md")):
         academic_text = academic(
             file_path,
             output_dir=out_dir,
@@ -412,8 +516,5 @@ def _process_text_file_original_logic(file_path, out_dir, lang, llm, chunk_lengt
             f.write(academic_text)
 
         return academic_text, output_file, None, base_name
-    
+
     return "Error: Cannot process this file type without subcommand", None, None, None
-
-
-

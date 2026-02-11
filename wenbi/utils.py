@@ -202,10 +202,26 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         logger.debug(f"Include timestamps: {cite_timestamps}")
     
     try:
-        vtt_df = parse_subtitle(file_path, verbose=verbose)
+        # Check if file is markdown or plain text (not subtitle format)
+        if file_path.lower().endswith(('.md', '.markdown', '.txt')):
+            # Read file content directly
+            try:
+                with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
+                    content = f.read()
+                if verbose:
+                    logger.debug(f"Read {len(content)} characters from file")
+                # Create a simple DataFrame structure for consistency
+                vtt_df = pd.DataFrame({"Timestamps": [""], "Content": [content]})
+            except FileNotFoundError:
+                if verbose:
+                    logger.debug(f"File not found: {file_path}")
+                vtt_df = pd.DataFrame(columns=["Timestamps", "Content"])
+        else:
+            # Try to parse as subtitle file
+            vtt_df = parse_subtitle(file_path, verbose=verbose)
         
         if verbose:
-            logger.debug(f"Parsed {len(vtt_df)} subtitle segments")
+            logger.debug(f"Parsed {len(vtt_df)} segments")
         
         if cite_timestamps and not vtt_df.empty and vtt_df['Timestamps'].notna().any():
             if verbose:
@@ -213,7 +229,7 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
             return _segment_with_timestamps(vtt_df, sentence_count, verbose=verbose)
         
         # Regular segmentation without timestamps
-        all_content = "。".join(vtt_df["Content"]) if not vtt_df.empty else ""
+        all_content = " ".join(vtt_df["Content"].astype(str)) if not vtt_df.empty else ""
         
         if verbose:
             logger.debug(f"Total content length: {len(all_content)} characters")

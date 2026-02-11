@@ -375,6 +375,9 @@ def handle_translate_command(args):
     # Load config if provided
     config = load_config(args.config)
 
+    # DeepL is always enabled by default
+    deepl_key = args.deepl_key if hasattr(args, 'deepl_key') else ""
+
     # Prepare parameters
     params = {
         "output_dir": args.output_dir or config.get("output_dir", ""),
@@ -391,6 +394,9 @@ def handle_translate_command(args):
         "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
         "output_wav": args.output_wav or config.get("output_wav", ""),
         "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
+        "keep_original_lang": args.keep_original_lang or config.get("keep_original_lang", False),
+        "use_deepl": True,
+        "deepl_key": deepl_key,
         "verbose": args.verbose,
     }
 
@@ -411,18 +417,22 @@ def handle_translate_command(args):
         params["timestamp"] = None
 
     # Use the new process_input function that handles all file types
-    is_url = args.input.startswith(("http://", "https://", "www."))
-    result = process_input(
-        None if is_url else args.input, args.input if is_url else "", **params
-    )
+    try:
+        is_url = args.input.startswith(("http://", "https://", "www."))
+        result = process_input(
+            None if is_url else args.input, args.input if is_url else "", **params
+        )
 
-    if result[0] and not result[0].startswith("Error"):
-        print("Translation completed successfully!")
-        print("Output file:", result[1] if result[1] else "Text output only")
-        if result[1]:
-            print("You can find the translated text in:", result[1])
-    else:
-        print("Error:", result[0])
+        if result[0] and not result[0].startswith("Error"):
+            print("Translation completed successfully!")
+            print("Output file:", result[1] if result[1] else "Text output only")
+            if result[1]:
+                print("You can find the translated text in:", result[1])
+        else:
+            print("Error:", result[0] if result[0] else "Unknown error (no error message returned)")
+    except Exception as e:
+        logger.exception("Unexpected error during translation")
+        print(f"Error: {e}")
 
 
 def add_global_args(subparser):
@@ -517,6 +527,18 @@ def add_global_args(subparser):
         action="store_true",
         default=False,
         help="Include timestamps as headers in markdown output for traceability",
+    )
+    subparser.add_argument(
+        "--keep-original-lang",
+        "-kol",
+        action="store_true",
+        default=False,
+        help="Keep original language alongside translated text (original above, translation below)",
+    )
+    subparser.add_argument(
+        "--deepl-key",
+        default="",
+        help="DeepL API key (uses DEEPL_API_KEY env var if not provided)",
     )
     subparser.add_argument(
         "--verbose",
@@ -1850,6 +1872,18 @@ def main():
         help="Include timestamps as headers in markdown output for traceability",
     )
     parser.add_argument(
+        "--keep-original-lang",
+        "-kol",
+        action="store_true",
+        default=False,
+        help="Keep original language alongside translated text (original above, translation below)",
+    )
+    parser.add_argument(
+        "--deepl-key",
+        default="",
+        help="DeepL API key (uses DEEPL_API_KEY env var if not provided)",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -1893,6 +1927,9 @@ def main():
     # Load config file if provided
     config = load_config(args.config)
 
+    # DeepL is always enabled by default
+    deepl_key = args.deepl_key if hasattr(args, 'deepl_key') else ""
+
     # Command line arguments take precedence over config file
     params = {
         "output_dir": args.output_dir or config.get("output_dir", ""),
@@ -1908,6 +1945,9 @@ def main():
         or config.get("transcribe_model", "large-v3-turbo"),
         "output_wav": args.output_wav or config.get("output_wav", ""),
         "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
+        "keep_original_lang": args.keep_original_lang or config.get("keep_original_lang", False),
+        "use_deepl": True,
+        "deepl_key": deepl_key,
         "verbose": args.verbose or config.get("verbose", False),
     }
 

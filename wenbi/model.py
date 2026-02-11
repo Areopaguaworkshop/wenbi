@@ -1,6 +1,6 @@
-import dspy
-import os
 import logging
+import os
+
 try:
     import litellm
 except ImportError:
@@ -8,9 +8,24 @@ except ImportError:
 from wenbi.utils import segment
 
 
+def _import_dspy():
+    """Import dspy lazily so DeepL-first flows don't fail at module import time."""
+    try:
+        if "DSPY_CACHEDIR" not in os.environ:
+            cache_dir = os.path.join(os.getcwd(), ".dspy_cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            os.environ["DSPY_CACHEDIR"] = cache_dir
+        import dspy
+
+        return dspy
+    except Exception as e:
+        raise RuntimeError(f"Failed to import dspy: {e}") from e
+
+
 def configure_lm(model_string, verbose=False, **kwargs):
     """Configure the Language Model with verbose logging support"""
     logger = logging.getLogger(__name__)
+    dspy = _import_dspy()
 
     if not model_string:
         model_string = "ollama/qwen3"
@@ -26,6 +41,21 @@ def configure_lm(model_string, verbose=False, **kwargs):
 
     config = kwargs
     if provider == "ollama":
+        # Check if Ollama is running before trying to configure
+        try:
+            import requests
+
+            response = requests.get("http://localhost:11434/api/tags", timeout=2)
+            if response.status_code != 200:
+                raise ConnectionError(
+                    f"Ollama returned status code {response.status_code}"
+                )
+        except Exception as e:
+            raise ConnectionError(
+                f"Cannot connect to Ollama at http://localhost:11434. "
+                f"Please ensure Ollama is running. Error: {e}"
+            )
+
         config.update(
             {
                 "base_url": "http://localhost:11434",
@@ -46,8 +76,7 @@ def configure_lm(model_string, verbose=False, **kwargs):
             logger.debug(f"OpenAI configuration: {config}")
         lm = dspy.LM(**config)
     elif provider == "gemini":
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv(
-            "GOOGLE_API_KEY_JSON")
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY_JSON")
         if not api_key:
             raise ValueError(
                 "GOOGLE_API_KEY or GOOGLE_API_KEY_JSON environment variable not set."
@@ -55,8 +84,7 @@ def configure_lm(model_string, verbose=False, **kwargs):
 
         # Extract the actual model name (e.g., "gemini-2.5-flash" from "gemini/gemini-2.5-flash")
         model_name = (
-            model_string.split(
-                "/", 1)[1] if "/" in model_string else model_string
+            model_string.split("/", 1)[1] if "/" in model_string else model_string
         )
 
         # Use the correct format for LiteLLM Gemini integration
@@ -94,9 +122,17 @@ def translate(
     temperature=0.1,
     cite_timestamps=False,
     verbose=False,
+    use_deepl=True,
+    deepl_key=None,
+    keep_original_lang=False,
 ):
     """
-    Translate text content using LLM with verbose logging support.
+    Translate text content using DeepL (primary) with LLM fallback.
+
+    Args:
+        use_deepl: Always True - DeepL API is always attempted first
+        deepl_key: Optional DeepL API key (uses DEEPL_API_KEY env var if not provided)
+        keep_original_lang: If True, output both original and translated text side-by-side
     """
     logger = logging.getLogger(__name__)
 
@@ -105,38 +141,77 @@ def translate(
         logger.debug(f"Input file: {input_file}")
         logger.debug(f"Target language: {translate_language}")
         logger.debug(f"LLM model: {llm}")
+        logger.debug(f"Use DeepL: {use_deepl}")
         logger.debug(f"Chunk length: {chunk_length}")
         logger.debug(f"Max tokens: {max_tokens}")
         logger.debug(f"Include timestamps: {cite_timestamps}")
+        logger.debug(f"Keep original language: {keep_original_lang}")
 
-    # Configure LLM
-    lm = configure_lm(
-        llm,
-        verbose=verbose,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        temperature=temperature,
-    )
+    # Try to initialize DeepL if requested
+    deepl_translator = None
+    deepl_available = False
+    if use_deepl:
+        try:
+            from wenbi.llm.deepl import configure_deepl, is_deepl_available
 
-    class TranslateSignature(dspy.Signature):
-        """Translate the given text to the target language while preserving the original meaning and style."""
+            if is_deepl_available(deepl_key, verbose=verbose):
+                deepl_translator = configure_deepl(deepl_key, verbose=verbose)
+                deepl_available = True
+                if verbose:
+                    logger.debug("DeepL translator initialized successfully")
+            else:
+                if verbose:
+                    logger.debug("DeepL not available, will use LLM only")
+        except Exception as e:
+            if verbose:
+                logger.debug(f"Failed to initialize DeepL: {e}")
+            deepl_available = False
 
-        text_to_translate = dspy.InputField(
-            desc="Text content to be translated")
-        target_language = dspy.InputField(
-            desc="Target language for translation")
-        translated_text = dspy.OutputField(
-            desc="Translated text in the target language"
-        )
+    # Configure LLM lazily: only initialize if DeepL fails for a chunk.
+    translate_module = None
+    llm_init_error = None
 
-    translate_module = dspy.Predict(TranslateSignature)
+    def get_translate_module():
+        nonlocal translate_module, llm_init_error
+        if translate_module is not None:
+            return translate_module
+        if llm_init_error is not None:
+            raise llm_init_error
+
+        try:
+            lm = configure_lm(
+                llm,
+                verbose=verbose,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                temperature=temperature,
+            )
+            dspy = _import_dspy()
+        except Exception as e:
+            llm_init_error = e
+            raise
+
+        class TranslateSignature(dspy.Signature):
+            """Translate the given text to the target language while preserving the original meaning and style."""
+
+            text_to_translate = dspy.InputField(desc="Text content to be translated")
+            target_language = dspy.InputField(desc="Target language for translation")
+            translated_text = dspy.OutputField(
+                desc="Translated text in the target language"
+            )
+
+        translate_module = dspy.Predict(TranslateSignature)
+        if verbose:
+            logger.debug("LLM fallback module initialized")
+        return translate_module
 
     if verbose:
-        logger.debug("LLM translation module initialized")
+        logger.debug(
+            "Translation modules initialized (DeepL primary, LLM lazy fallback)"
+        )
 
     # Read and segment the input text
-    segmented_text = segment(input_file, chunk_length,
-                             cite_timestamps, verbose=verbose)
+    segmented_text = segment(input_file, chunk_length, cite_timestamps, verbose=verbose)
 
     # Split into chunks for processing
     chunks = segmented_text.split("\n\n")
@@ -144,6 +219,8 @@ def translate(
         logger.debug(f"Text divided into {len(chunks)} chunks for processing")
 
     translated_chunks = []
+    deepl_count = 0
+    llm_count = 0
 
     for i, chunk in enumerate(chunks, 1):
         if not chunk.strip():
@@ -152,8 +229,7 @@ def translate(
 
         if verbose:
             logger.debug(
-                f"Translating chunk {
-                    i}/{len(chunks)} ({len(chunk)} characters)"
+                f"Translating chunk {i}/{len(chunks)} ({len(chunk)} characters)"
             )
 
         try:
@@ -169,13 +245,50 @@ def translate(
                     )
                 translated_chunks.append(chunk)
             else:
-                result = translate_module(
-                    text_to_translate=chunk, target_language=translate_language
-                )
-                translated_chunks.append(result.translated_text)
+                translated_text = None
 
-                if verbose:
-                    logger.debug(f"Chunk {i} translated successfully")
+                # Try DeepL first if available
+                if deepl_available:
+                    try:
+                        from wenbi.llm.deepl import translate_with_deepl
+
+                        translated_text = translate_with_deepl(
+                            deepl_translator, chunk, translate_language, verbose=verbose
+                        )
+                        deepl_count += 1
+                        if verbose:
+                            logger.debug(f"Chunk {i} translated with DeepL")
+                    except Exception as e:
+                        if verbose:
+                            logger.debug(
+                                f"DeepL failed for chunk {i}: {e}. Falling back to LLM."
+                            )
+                        translated_text = None
+
+                # Fallback to LLM if DeepL failed or not available
+                if translated_text is None:
+                    try:
+                        translate_module = get_translate_module()
+                        result = translate_module(
+                            text_to_translate=chunk, target_language=translate_language
+                        )
+                        translated_text = result.translated_text
+                        llm_count += 1
+                        if verbose:
+                            logger.debug(f"Chunk {i} translated with LLM (fallback)")
+                    except Exception as e:
+                        error_msg = f"Error translating chunk {i}: No translation service available (DeepL failed, LLM unavailable: {e})"
+                        if verbose:
+                            logger.debug(error_msg)
+                        print(error_msg)
+                        translated_text = f"[Translation Error: {chunk}]"
+
+                # Format output based on keep_original_lang flag
+                if keep_original_lang:
+                    chunk_output = f"**[Original]**\n{chunk}\n\n**[{translate_language}]**\n{translated_text}"
+                    translated_chunks.append(chunk_output)
+                else:
+                    translated_chunks.append(translated_text)
 
         except Exception as e:
             error_msg = f"Error translating chunk {i}: {e}"
@@ -188,10 +301,9 @@ def translate(
 
     if verbose:
         logger.debug(
-            f"Translation completed. Final text length: {
-                len(final_translation)
-            } characters"
+            f"Translation completed. Final text length: {len(final_translation)} characters"
         )
+        logger.debug(f"DeepL chunks: {deepl_count}, LLM chunks: {llm_count}")
         logger.debug("=== Translation Process Completed ===")
 
     return final_translation
@@ -232,6 +344,8 @@ def rewrite(
         temperature=temperature,
     )
 
+    dspy = _import_dspy()
+
     class RewriteSignature(dspy.Signature):
         """
         Rewrite this text in {rewrite_lang} from oral to written.  Follow these rules strictly:
@@ -241,10 +355,8 @@ def rewrite(
         """
 
         oral_text = dspy.InputField(desc="Oral or spoken text to be rewritten")
-        target_language = dspy.InputField(
-            desc="Target language for the rewriting")
-        written_text = dspy.OutputField(
-            desc="Polished written version of the text")
+        target_language = dspy.InputField(desc="Target language for the rewriting")
+        written_text = dspy.OutputField(desc="Polished written version of the text")
 
     rewrite_module = dspy.Predict(RewriteSignature)
 
@@ -252,8 +364,7 @@ def rewrite(
         logger.debug("LLM rewrite module initialized")
 
     # Read and segment the input text
-    segmented_text = segment(input_file, chunk_length,
-                             cite_timestamps, verbose=verbose)
+    segmented_text = segment(input_file, chunk_length, cite_timestamps, verbose=verbose)
 
     # Split into chunks for processing
     chunks = segmented_text.split("\n\n")
@@ -268,48 +379,47 @@ def rewrite(
             continue
 
         if verbose:
-            logger.debug(f"Rewriting chunk {
-                         i}/{len(chunks)} ({len(chunk)} characters)")
+            logger.debug(f"Rewriting chunk {i}/{len(chunks)} ({len(chunk)} characters)")
 
         try:
             # Check if chunk contains a timestamp header when cite_timestamps is True
             timestamp_header = None
             content_to_rewrite = chunk
-            
+
             if cite_timestamps:
                 # Extract timestamp header if present (format: ### **timestamp**)
-                lines = chunk.split('\n', 1)
+                lines = chunk.split("\n", 1)
                 first_line = lines[0].strip()
-                
+
                 if first_line.startswith("### **") and first_line.endswith("**"):
                     timestamp_header = first_line
                     # Content is everything after the first line
                     content_to_rewrite = lines[1] if len(lines) > 1 else ""
-                    
+
                     if verbose:
-                        logger.debug(
-                            f"Extracted timestamp header: {timestamp_header}"
-                        )
-            
+                        logger.debug(f"Extracted timestamp header: {timestamp_header}")
+
             # Skip rewriting if only timestamp header exists with no content
             if not content_to_rewrite.strip():
                 rewritten_chunks.append(chunk)
                 if verbose:
-                    logger.debug(f"Chunk {i} contains only timestamp header, skipping rewrite")
+                    logger.debug(
+                        f"Chunk {i} contains only timestamp header, skipping rewrite"
+                    )
                 continue
-            
+
             # Rewrite the content
             result = rewrite_module(
                 oral_text=content_to_rewrite, target_language=rewrite_language
             )
             rewritten_content = result.written_text
-            
+
             # Reconstruct chunk with timestamp header if it was extracted
             if cite_timestamps and timestamp_header:
                 rewritten_chunk = f"{timestamp_header}\n\n{rewritten_content}"
             else:
                 rewritten_chunk = rewritten_content
-            
+
             rewritten_chunks.append(rewritten_chunk)
 
             if verbose:
@@ -326,8 +436,7 @@ def rewrite(
 
     if verbose:
         logger.debug(
-            f"Rewrite completed. Final text length: {
-                len(final_rewrite)} characters"
+            f"Rewrite completed. Final text length: {len(final_rewrite)} characters"
         )
         logger.debug("=== Rewrite Process Completed ===")
 
@@ -381,6 +490,8 @@ def academic(
         temperature=temperature,
     )
 
+    dspy = _import_dspy()
+
     class AcademicSignature(dspy.Signature):
         """
         Rewrite this text in formal academic style in {academic_lang}. Follow these rules strictly:
@@ -393,10 +504,8 @@ def academic(
         input_text = dspy.InputField(
             desc="Original text to be transformed into academic style"
         )
-        target_language = dspy.InputField(
-            desc="Target language for academic writing")
-        academic_text = dspy.OutputField(
-            desc="Text rewritten in formal academic style")
+        target_language = dspy.InputField(desc="Target language for academic writing")
+        academic_text = dspy.OutputField(desc="Text rewritten in formal academic style")
 
     academic_module = dspy.Predict(AcademicSignature)
 
@@ -453,8 +562,7 @@ def academic(
                 academic_chunks.append(result.academic_text)
 
                 if verbose:
-                    logger.debug(
-                        f"Chunk {i} converted to academic style successfully")
+                    logger.debug(f"Chunk {i} converted to academic style successfully")
 
         except Exception as e:
             error_msg = f"Error converting chunk {i} to academic style: {e}"
@@ -527,23 +635,25 @@ def process_docx(input_file, verbose=False):
 def read_markdown_file(file_path, verbose=False):
     """
     Read markdown file content with verbose logging support.
-    
+
     Returns: (markdown_content, file_path)
     """
     logger = logging.getLogger(__name__)
-    
+
     if verbose:
         logger.debug(f"Reading markdown file: {file_path}")
-    
+
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
-        
+
         if verbose:
-            logger.debug(f"Markdown file read successfully. Content length: {len(content)} characters")
-        
+            logger.debug(
+                f"Markdown file read successfully. Content length: {len(content)} characters"
+            )
+
         return content, file_path
-    
+
     except Exception as e:
         error_msg = f"Error reading markdown file: {e}"
         if verbose:
@@ -573,7 +683,7 @@ def convert_slides_to_markdown(
 
         if verbose:
             logger.debug("Loading marker-pdf models...")
-        
+
         # Create model dict for conversion
         artifact_dict = create_model_dict()
 
@@ -584,7 +694,7 @@ def convert_slides_to_markdown(
         converter = PdfConverter(
             artifact_dict=artifact_dict,
         )
-        
+
         markdown_output = converter(slides_file)
         markdown_text = markdown_output.markdown
 
@@ -597,7 +707,8 @@ def convert_slides_to_markdown(
         if image_export_mode == "none":
             # Remove image references from markdown
             import re
-            markdown_text = re.sub(r'!\[.*?\]\(.*?\)', '', markdown_text)
+
+            markdown_text = re.sub(r"!\[.*?\]\(.*?\)", "", markdown_text)
             if verbose:
                 logger.debug("Stripped image references from markdown")
 
@@ -629,7 +740,7 @@ def convert_slides_to_markdown(
 
 def convert_single_slide_image(
     image_path,
-    langs=['Chinese', 'English'],
+    langs=["Chinese", "English"],
     output_dir=None,
     verbose=False,
 ):
@@ -644,14 +755,15 @@ def convert_single_slide_image(
         logger.debug(f"Image file: {image_path}")
 
     try:
+        import tempfile
+
         from marker.converters.pdf import PdfConverter
         from marker.models import create_model_dict
         from PIL import Image
-        import tempfile
 
         if verbose:
             logger.debug("Loading marker-pdf models...")
-        
+
         # Create model dict for conversion
         artifact_dict = create_model_dict()
 
@@ -663,29 +775,32 @@ def convert_single_slide_image(
             work_dir = output_dir
         else:
             work_dir = tempfile.mkdtemp()
-        
+
         temp_pdf = os.path.join(work_dir, "temp_ocr.pdf")
-        
+
         # Convert image to PDF
         img = Image.open(image_path)
-        if img.mode == 'RGBA':
-            img = img.convert('RGB')
-        
+        if img.mode == "RGBA":
+            img = img.convert("RGB")
+
         img.save(temp_pdf, "PDF", resolution=150.0)
-        
+
         # Convert PDF to markdown
         converter = PdfConverter(
             artifact_dict=artifact_dict,
         )
-        
+
         markdown_output = converter(temp_pdf)
-        
+
         if verbose:
-            logger.debug(f"OCR completed. Text length: {len(markdown_output.markdown)} characters")
+            logger.debug(
+                f"OCR completed. Text length: {len(markdown_output.markdown)} characters"
+            )
             logger.debug(f"Images output to: {work_dir}")
 
         # Cleanup temp PDF only if we created a temp directory
         import shutil
+
         if not (output_dir and os.path.exists(output_dir)):
             shutil.rmtree(work_dir)
         else:
@@ -697,13 +812,10 @@ def convert_single_slide_image(
 
         # Extract confidence and metadata (marker doesn't provide this for images directly)
         result = {
-            'text': markdown_output.markdown.strip(),
-            'confidence': 0.8,  # Default confidence for image OCR
-            'page_id': 1,
-            'metadata': {
-                'source': image_path,
-                'languages': langs
-            }
+            "text": markdown_output.markdown.strip(),
+            "confidence": 0.8,  # Default confidence for image OCR
+            "page_id": 1,
+            "metadata": {"source": image_path, "languages": langs},
         }
 
         return result
@@ -719,9 +831,6 @@ def convert_single_slide_image(
             logger.debug(error_msg)
         raise Exception(error_msg)
 
-
-
-
     except Exception as e:
         error_msg = f"Error during alignment: {e}"
         if verbose:
@@ -731,9 +840,6 @@ def convert_single_slide_image(
             "aligned_section": "NO_MATCH",
             "confidence": "none",
         }
-
-
-
 
 
 def combine_speech_and_slides_enhanced(
@@ -760,13 +866,13 @@ def combine_speech_and_slides_enhanced(
         logger.debug(f"Slides content length: {len(slides_markdown)} characters")
 
     # Import enhanced functions
+    from wenbi.enhanced_combination import _extract_slides as enhanced_extract_slides
     from wenbi.enhanced_combination import (
+        build_enhanced_combined_markdown,
         calculate_combined_similarity,
         create_similarity_matrix,
-        find_optimal_alignment,
         distribute_unaligned_slides,
-        build_enhanced_combined_markdown,
-        _extract_slides as enhanced_extract_slides
+        find_optimal_alignment,
     )
 
     # Step 1: Extract slides from markdown
@@ -778,23 +884,29 @@ def combine_speech_and_slides_enhanced(
     # Step 2: Split speech into paragraphs (reuse existing logic)
     strategies = [
         lambda x: [p.strip() for p in x.split("\n\n") if p.strip()],  # Double newlines
-        lambda x: [p.strip() for p in x.split("\n") if p.strip()],    # Single newlines
-        lambda x: [p.strip() for p in x.replace('\n\n', '\n').split('\n') if p.strip()],  # Normalize then split
+        lambda x: [p.strip() for p in x.split("\n") if p.strip()],  # Single newlines
+        lambda x: [
+            p.strip() for p in x.replace("\n\n", "\n").split("\n") if p.strip()
+        ],  # Normalize then split
     ]
-    
+
     best_paragraphs = []
     best_content_ratio = 0
-    
+
     for strategy in strategies:
         test_paragraphs = strategy(speech_markdown)
-        content_ratio = sum(len(p) for p in test_paragraphs) / len(speech_markdown) if speech_markdown else 0
-        
+        content_ratio = (
+            sum(len(p) for p in test_paragraphs) / len(speech_markdown)
+            if speech_markdown
+            else 0
+        )
+
         if content_ratio > best_content_ratio and len(test_paragraphs) > 0:
             best_content_ratio = content_ratio
             best_paragraphs = test_paragraphs
-    
+
     speech_paragraphs = best_paragraphs
-    
+
     # Fallback: if all strategies fail, use entire content as one paragraph
     if not speech_paragraphs and speech_markdown.strip():
         speech_paragraphs = [speech_markdown.strip()]
@@ -803,17 +915,25 @@ def combine_speech_and_slides_enhanced(
 
     if verbose:
         logger.debug(f"Speech split into {len(speech_paragraphs)} paragraphs")
-        preserved_ratio = sum(len(p) for p in speech_paragraphs) / len(speech_markdown) if speech_markdown else 0
+        preserved_ratio = (
+            sum(len(p) for p in speech_paragraphs) / len(speech_markdown)
+            if speech_markdown
+            else 0
+        )
         logger.debug(f"Content preservation ratio: {preserved_ratio:.2%}")
 
     # Step 3: Create similarity matrix for all slide-speech pairs
     similarity_matrix = create_similarity_matrix(slides, speech_paragraphs, verbose)
 
     # Step 4: Find optimal alignment with hybrid temporal constraints
-    aligned_slides = find_optimal_alignment(similarity_matrix, len(slides), len(speech_paragraphs), verbose)
+    aligned_slides = find_optimal_alignment(
+        similarity_matrix, len(slides), len(speech_paragraphs), verbose
+    )
 
     # Step 5: Handle unaligned slides with even distribution
-    aligned_slides = distribute_unaligned_slides(slides, speech_paragraphs, aligned_slides, verbose)
+    aligned_slides = distribute_unaligned_slides(
+        slides, speech_paragraphs, aligned_slides, verbose
+    )
 
     # Step 6: Build enhanced combined markdown with content preservation
     combined_content = build_enhanced_combined_markdown(
@@ -824,17 +944,27 @@ def combine_speech_and_slides_enhanced(
     if verbose:
         original_speech_length = len(speech_markdown)
         final_combined_length = len(combined_content)
-        preservation_ratio = final_combined_length / original_speech_length if original_speech_length else 0
+        preservation_ratio = (
+            final_combined_length / original_speech_length
+            if original_speech_length
+            else 0
+        )
         logger.debug(f"Final content preservation ratio: {preservation_ratio:.2%}")
-        
+
         # Count aligned vs unaligned slides
-        aligned_count = len([slide for slide, speeches in aligned_slides.items() if speeches])
+        aligned_count = len(
+            [slide for slide, speeches in aligned_slides.items() if speeches]
+        )
         unaligned_count = len(slides) - aligned_count
-        logger.debug(f"Alignment summary: {aligned_count} aligned, {unaligned_count} distributed slides")
-        
+        logger.debug(
+            f"Alignment summary: {aligned_count} aligned, {unaligned_count} distributed slides"
+        )
+
         if preservation_ratio < 0.90:
-            logger.warning(f"Content preservation ratio is low: {preservation_ratio:.2%} - some speech content may be missing!")
-        
+            logger.warning(
+                f"Content preservation ratio is low: {preservation_ratio:.2%} - some speech content may be missing!"
+            )
+
         logger.debug("=== Enhanced Speech and Slides Combination Completed ===")
 
     return combined_content
@@ -910,7 +1040,9 @@ def _find_matching_paragraph(matched_section, speech_paragraphs, verbose=False):
     return None
 
 
-def _build_combined_markdown(speech_paragraphs, aligned_results, cite_timestamps=False, verbose=False):
+def _build_combined_markdown(
+    speech_paragraphs, aligned_results, cite_timestamps=False, verbose=False
+):
     """Build combined markdown by inserting slides before matching speech sections"""
     logger = logging.getLogger(__name__)
 
@@ -951,7 +1083,9 @@ def _build_combined_markdown(speech_paragraphs, aligned_results, cite_timestamps
     result = "\n".join(combined).strip()
 
     if verbose:
-        logger.debug(f"Combined content built with {len(speech_paragraphs)} speech paragraphs")
+        logger.debug(
+            f"Combined content built with {len(speech_paragraphs)} speech paragraphs"
+        )
         logger.debug(f"Final combined content length: {len(result)} characters")
         # Calculate final preservation ratio (need to pass original speech length)
         # Note: This will be calculated in the calling function
