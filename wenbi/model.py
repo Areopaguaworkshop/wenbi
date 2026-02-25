@@ -348,7 +348,7 @@ def rewrite(
 
     class RewriteSignature(dspy.Signature):
         """
-        Rewrite this text in {rewrite_lang} from oral to written.  Follow these rules strictly:
+        Rewrite this text in {target_language} from oral to written.  Follow these rules strictly:
         1. Correct any basic grammar, punctuation, or usage errors.
         2. Improve clarity while preserving the original meaning and scholarly tone (trying your best not to change the structure of sentence)
         3. IMPORTANT: Maintaining the original meaning and length (97% of original)

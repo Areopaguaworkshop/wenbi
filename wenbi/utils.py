@@ -72,7 +72,11 @@ def parse_subtitle(file_path, vtt_file=None, verbose=False):
                     if stripped:  # only add non-empty text lines
                         current_content.append(stripped)
                     i += 1
-                contents.append(" ".join(current_content))
+                content_str = "，".join(current_content)
+                # Add period at end to mark sentence boundary for Chinese NLP
+                if content_str and not any(content_str.endswith(p) for p in "。！？"):
+                    content_str += "。"
+                contents.append(content_str)
             # Handle other subtitle formats (Dialogue or similar)
             elif "Dialogue:" in line or re.match(r"{\d+}{\d+}.*", line):
                 timestamps.append(line)
@@ -84,7 +88,11 @@ def parse_subtitle(file_path, vtt_file=None, verbose=False):
                     if stripped:
                         current_content.append(stripped)
                     i += 1
-                contents.append(" ".join(current_content))
+                content_str = "，".join(current_content)
+                # Add period at end to mark sentence boundary for Chinese NLP
+                if content_str and not any(content_str.endswith(p) for p in "。！？"):
+                    content_str += "。"
+                contents.append(content_str)
             else:
                 i += 1
         

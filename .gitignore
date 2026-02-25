@@ -47,3 +47,4 @@ instruction/**/*
 .coverage.*
 htmlcov/
 .pytest_cache/
+.dspy_cache/
