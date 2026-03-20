@@ -65,7 +65,7 @@ def _transcribe_qwen3(
         
         result = model.transcribe(
             audio=audio_path,
-            language=language or "auto",
+            language=language,  # Pass None for auto-detect
         )
         
         if isinstance(result, list) and len(result) > 0:
