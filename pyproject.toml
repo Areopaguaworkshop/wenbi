@@ -6,7 +6,8 @@ license = "Apache-2.0"
 authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
 dependencies = [
     "openai-whisper>=20240930",
-    "qwen-asr>=0.0.6",
+    "funasr>=1.0.0",
+    "modelscope>=1.11.1",
     "gradio>=5.18.0",
     "moviepy>=2.1.2",
     "pydub>=0.25.1",

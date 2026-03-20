@@ -10,8 +10,6 @@
 #   universal: false
 
 -e file:.
-accelerate==1.12.0
-    # via qwen-asr
 aiofiles==24.1.0
     # via gradio
 aiohappyeyeballs==2.6.1
@@ -24,11 +22,17 @@ aiosignal==1.3.2
     # via aiohttp
 alembic==1.15.2
     # via optuna
+aliyun-python-sdk-core==2.16.0
+    # via aliyun-python-sdk-kms
+    # via oss2
+aliyun-python-sdk-kms==2.16.5
+    # via oss2
 annotated-types==0.7.0
     # via pydantic
 anthropic==0.46.0
     # via marker-pdf
 antlr4-python3-runtime==4.9.3
+    # via hydra-core
     # via omegaconf
 anyio==4.9.0
     # via anthropic
@@ -51,8 +55,6 @@ attrs==25.3.0
     # via trio
 audioread==3.1.0
     # via librosa
-av==17.0.0
-    # via qwen-omni-utils
 backoff==2.2.1
     # via dspy
 beautifulsoup4==4.14.3
@@ -61,8 +63,6 @@ beautifulsoup4==4.14.3
     # via webdriverdownloader
 blessed==1.27.0
     # via inquirer
-blinker==1.9.0
-    # via flask
 blis==1.3.0
     # via thinc
 brotli==1.2.0
@@ -81,6 +81,7 @@ certifi==2025.4.26
     # via requests
     # via selenium
 cffi==1.17.1
+    # via cryptography
     # via soundfile
     # via weasyprint
 cfgv==3.5.0
@@ -89,7 +90,6 @@ charset-normalizer==3.4.1
     # via reportlab
     # via requests
 click==8.2.1
-    # via flask
     # via litellm
     # via marker-pdf
     # via pdftext
@@ -110,6 +110,10 @@ confection==0.1.5
     # via weasel
 contourpy==1.3.2
     # via matplotlib
+crcmod==1.7
+    # via oss2
+cryptography==46.0.0
+    # via aliyun-python-sdk-core
 cssselect2==0.8.0
     # via weasyprint
 cycler==0.12.1
@@ -118,8 +122,6 @@ cymem==2.0.11
     # via preshed
     # via spacy
     # via thinc
-cython==3.2.4
-    # via dynet38
 datasets==3.5.1
     # via dspy
 decorator==5.2.1
@@ -143,8 +145,8 @@ docopt==0.6.2
     # via pyannote-pipeline
 dspy==2.6.21
     # via wenbi
-dynet38==2.2
-    # via nagisa
+editdistance==0.8.1
+    # via funasr
 editor==1.6.6
     # via inquirer
 einops==0.8.1
@@ -161,6 +163,7 @@ ffmpy==0.5.0
 filelock==3.18.0
     # via datasets
     # via huggingface-hub
+    # via modelscope
     # via pyannote-pipeline
     # via torch
     # via transformers
@@ -168,8 +171,6 @@ filelock==3.18.0
 filetype==1.2.0
     # via marker-pdf
     # via surya-ocr
-flask==3.1.3
-    # via qwen-asr
 fonttools==4.61.1
     # via matplotlib
     # via weasyprint
@@ -187,6 +188,8 @@ fsspec==2025.3.0
     # via torch
 ftfy==6.3.1
     # via marker-pdf
+funasr==1.3.1
+    # via wenbi
 future==1.0.0
     # via ffmpeg-python
 google-auth==2.39.0
@@ -196,7 +199,6 @@ google-genai==1.12.1
     # via marker-pdf
     # via wenbi
 gradio==5.27.1
-    # via qwen-asr
     # via wenbi
 gradio-client==1.9.1
     # via gradio
@@ -222,7 +224,6 @@ httpx==0.28.1
     # via pydeeplx
     # via safehttpx
 huggingface-hub==0.36.0
-    # via accelerate
     # via datasets
     # via gradio
     # via gradio-client
@@ -230,6 +231,8 @@ huggingface-hub==0.36.0
     # via speechbrain
     # via tokenizers
     # via transformers
+hydra-core==1.3.2
+    # via funasr
 hyperpyyaml==1.2.2
     # via speechbrain
 identify==2.6.16
@@ -251,10 +254,13 @@ iniconfig==2.1.0
     # via pytest
 inquirer==3.4.1
     # via translatepy
-itsdangerous==2.2.0
-    # via flask
+jaconv==0.5.0
+    # via funasr
+jamo==0.4.1
+    # via funasr
+jieba==0.42.1
+    # via funasr
 jinja2==3.1.6
-    # via flask
     # via gradio
     # via litellm
     # via spacy
@@ -262,9 +268,12 @@ jinja2==3.1.6
 jiter==0.9.0
     # via anthropic
     # via openai
+jmespath==0.10.0
+    # via aliyun-python-sdk-core
 joblib==1.4.2
     # via dspy
     # via librosa
+    # via pynndescent
     # via scikit-learn
     # via speechbrain
 json-repair==0.43.0
@@ -275,6 +284,8 @@ jsonschema-specifications==2025.4.1
     # via jsonschema
 julius==0.2.7
     # via torch-audiomentations
+kaldiio==2.18.1
+    # via funasr
 kiwisolver==1.4.8
     # via matplotlib
 langcodes==3.5.0
@@ -287,8 +298,7 @@ lazy-loader==0.4
     # via librosa
     # via scikit-image
 librosa==0.11.0
-    # via qwen-asr
-    # via qwen-omni-utils
+    # via funasr
 lightning==2.5.1.post0
     # via pyannote-audio
 lightning-utilities==0.14.3
@@ -299,6 +309,7 @@ litellm==1.67.4.post1
     # via dspy
 llvmlite==0.44.0
     # via numba
+    # via pynndescent
 lxml==5.4.0
     # via free-proxy
     # via python-docx
@@ -318,16 +329,17 @@ markdownify==1.2.2
 marker-pdf==1.10.2
     # via wenbi
 markupsafe==3.0.2
-    # via flask
     # via gradio
     # via jinja2
     # via mako
-    # via werkzeug
 matplotlib==3.10.1
     # via pyannote-metrics
     # via ultralytics
 mdurl==0.1.2
     # via markdown-it-py
+modelscope==1.35.1
+    # via funasr
+    # via wenbi
 more-itertools==10.7.0
     # via openai-whisper
 moviepy==2.1.2
@@ -345,8 +357,6 @@ murmurhash==1.0.12
     # via preshed
     # via spacy
     # via thinc
-nagisa==0.2.11
-    # via qwen-asr
 natsort==8.4.0
     # via wenbi
 networkx==3.4.2
@@ -357,21 +367,21 @@ nodeenv==1.10.0
 numba==0.61.2
     # via librosa
     # via openai-whisper
+    # via pynndescent
+    # via umap-learn
 numpy==2.2.5
-    # via accelerate
     # via asteroid-filterbanks
     # via blis
     # via contourpy
     # via datasets
     # via dspy
-    # via dynet38
     # via fasttext
     # via gradio
     # via imageio
+    # via kaldiio
     # via librosa
     # via matplotlib
     # via moviepy
-    # via nagisa
     # via numba
     # via openai-whisper
     # via opencv-python
@@ -381,24 +391,25 @@ numpy==2.2.5
     # via pyannote-core
     # via pyannote-metrics
     # via pytorch-metric-learning
+    # via pytorch-wpe
     # via scenedetect
     # via scikit-image
     # via scikit-learn
     # via scipy
     # via soundfile
-    # via sox
     # via soxr
-    # via soynlp
     # via spacy
     # via speechbrain
     # via tensorboardx
     # via thinc
     # via tifffile
+    # via torch-complex
     # via torchmetrics
     # via torchvision
     # via transformers
     # via ultralytics
     # via ultralytics-thop
+    # via umap-learn
 nvidia-cublas-cu12==12.6.4.1
     # via nvidia-cudnn-cu12
     # via nvidia-cusolver-cu12
@@ -434,6 +445,7 @@ nvidia-nvjitlink-cu12==12.6.85
 nvidia-nvtx-cu12==12.6.77
     # via torch
 omegaconf==2.3.0
+    # via hydra-core
     # via pyannote-audio
 openai==1.76.0
     # via dspy
@@ -451,29 +463,32 @@ optuna==4.3.0
     # via pyannote-pipeline
 orjson==3.10.16
     # via gradio
+oss2==2.19.1
+    # via funasr
 outcome==1.3.0.post0
     # via trio
     # via trio-websocket
 packaging==24.2
-    # via accelerate
     # via datasets
     # via gradio
     # via gradio-client
     # via huggingface-hub
+    # via hydra-core
     # via lazy-loader
     # via lightning
     # via lightning-utilities
     # via matplotlib
+    # via modelscope
     # via optuna
     # via pooch
     # via pytest
     # via pytorch-lightning
-    # via qwen-omni-utils
     # via scikit-image
     # via spacy
     # via speechbrain
     # via tensorboardx
     # via thinc
+    # via torch-complex
     # via torch-pitch-shift
     # via torchmetrics
     # via transformers
@@ -494,7 +509,6 @@ pillow==10.4.0
     # via matplotlib
     # via moviepy
     # via python-pptx
-    # via qwen-omni-utils
     # via reportlab
     # via scikit-image
     # via surya-ocr
@@ -532,8 +546,6 @@ propcache==0.3.1
 protobuf==6.30.2
     # via tensorboardx
 psutil==7.2.2
-    # via accelerate
-    # via soynlp
     # via ultralytics
 pyannote-audio==3.3.2
     # via wenbi
@@ -563,6 +575,8 @@ pybind11==2.13.6
     # via fasttext
 pycparser==2.22
     # via cffi
+pycryptodome==3.23.0
+    # via oss2
 pydantic==2.11.3
     # via anthropic
     # via confection
@@ -596,6 +610,8 @@ pygments==2.19.1
     # via rich
 pymupdf==1.26.7
     # via wenbi
+pynndescent==0.6.0
+    # via umap-learn
 pyparsing==3.2.3
     # via matplotlib
 pypdf2==3.0.1
@@ -627,14 +643,15 @@ pytorch-lightning==2.5.1.post0
     # via lightning
 pytorch-metric-learning==2.8.1
     # via pyannote-audio
+pytorch-wpe==0.0.1
+    # via funasr
 pytz==2025.2
     # via pandas
-    # via qwen-asr
 pyuseragents==1.0.5
     # via translatepy
 pyyaml==6.0.2
-    # via accelerate
     # via datasets
+    # via funasr
     # via gradio
     # via huggingface-hub
     # via hyperpyyaml
@@ -647,10 +664,6 @@ pyyaml==6.0.2
     # via pytorch-lightning
     # via transformers
     # via ultralytics
-qwen-asr==0.0.6
-    # via wenbi
-qwen-omni-utils==0.0.9
-    # via qwen-asr
 rapidfuzz==3.14.3
     # via marker-pdf
 readchar==4.2.1
@@ -672,10 +685,12 @@ requests==2.32.3
     # via deepl
     # via dspy
     # via free-proxy
+    # via funasr
     # via google-genai
     # via huggingface-hub
+    # via modelscope
+    # via oss2
     # via pooch
-    # via qwen-omni-utils
     # via spacy
     # via tiktoken
     # via transformers
@@ -709,7 +724,6 @@ safehttpx==0.1.6
 safeio==1.2
     # via translatepy
 safetensors==0.7.0
-    # via accelerate
     # via transformers
 scenedetect==0.6.7.1
     # via wenbi
@@ -720,17 +734,20 @@ scikit-learn==1.6.1
     # via marker-pdf
     # via pyannote-metrics
     # via pyannote-pipeline
+    # via pynndescent
     # via pytorch-metric-learning
-    # via soynlp
+    # via umap-learn
 scipy==1.15.2
+    # via funasr
     # via librosa
     # via pyannote-core
     # via pyannote-metrics
+    # via pynndescent
     # via scikit-image
     # via scikit-learn
-    # via soynlp
     # via speechbrain
     # via ultralytics
+    # via umap-learn
 selenium==4.7.2
     # via srtranslator
 semantic-version==2.10.0
@@ -738,11 +755,13 @@ semantic-version==2.10.0
 semver==3.0.4
     # via pyannote-audio
 sentencepiece==0.2.0
+    # via funasr
     # via speechbrain
 setuptools==80.9.0
     # via fasttext
     # via lightning-utilities
     # via marisa-trie
+    # via modelscope
     # via spacy
     # via thinc
     # via torch
@@ -752,7 +771,7 @@ shellingham==1.5.4
 six==1.17.0
     # via langdetect
     # via markdownify
-    # via nagisa
+    # via oss2
     # via python-dateutil
 smart-open==7.1.0
     # via weasel
@@ -767,17 +786,13 @@ sortedcontainers==2.4.0
     # via pyannote-core
     # via trio
 soundfile==0.13.1
+    # via funasr
     # via librosa
     # via pyannote-audio
-    # via qwen-asr
 soupsieve==2.8.3
     # via beautifulsoup4
-sox==1.5.0
-    # via qwen-asr
 soxr==1.0.0
     # via librosa
-soynlp==0.0.493
-    # via qwen-asr
 spacy==3.8.5
     # via wenbi
 spacy-legacy==3.0.12
@@ -811,6 +826,7 @@ tabulate==0.9.0
 tenacity==9.1.2
     # via dspy
 tensorboardx==2.6.2.2
+    # via funasr
     # via pyannote-audio
 thinc==8.3.6
     # via spacy
@@ -832,7 +848,6 @@ tokenizers==0.22.2
 tomlkit==0.13.2
     # via gradio
 torch==2.7.0
-    # via accelerate
     # via asteroid-filterbanks
     # via julius
     # via lightning
@@ -852,6 +867,8 @@ torch==2.7.0
     # via ultralytics-thop
 torch-audiomentations==0.12.0
     # via pyannote-audio
+torch-complex==0.4.4
+    # via funasr
 torch-pitch-shift==1.2.5
     # via torch-audiomentations
 torchaudio==2.7.0
@@ -868,9 +885,11 @@ torchvision==0.22.0
 tqdm==4.67.1
     # via datasets
     # via dspy
+    # via funasr
     # via huggingface-hub
     # via lightning
     # via marker-pdf
+    # via modelscope
     # via openai
     # via openai-whisper
     # via optuna
@@ -882,10 +901,10 @@ tqdm==4.67.1
     # via spacy
     # via speechbrain
     # via transformers
+    # via umap-learn
     # via webdriverdownloader
 transformers==4.57.6
     # via marker-pdf
-    # via qwen-asr
     # via surya-ocr
 translatepy==2.3
     # via srtranslator
@@ -925,7 +944,6 @@ typing-extensions==4.13.2
     # via pytorch-lightning
     # via referencing
     # via rich-click
-    # via sox
     # via sqlalchemy
     # via torch
     # via typer
@@ -941,7 +959,10 @@ ultralytics==8.4.11
     # via wenbi
 ultralytics-thop==2.0.18
     # via ultralytics
+umap-learn==0.5.11
+    # via funasr
 urllib3==1.26.20
+    # via modelscope
     # via requests
     # via selenium
 uvicorn==0.34.2
@@ -968,8 +989,6 @@ webencodings==0.5.1
 websockets==15.0.1
     # via google-genai
     # via gradio-client
-werkzeug==3.1.6
-    # via flask
 wrapt==1.17.2
     # via smart-open
 wsproto==1.3.2

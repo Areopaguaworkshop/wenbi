@@ -114,7 +114,7 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
         file_path (str): Path to the audio file
         language (str, optional): Language code for transcription
         output_dir (str, optional): Directory to save the VTT file
-        model_size (str, optional): "1.7B" for Qwen3-ASR, or whisper size (tiny, base, small, medium, large-v1, large-v2, large-v3)
+        model_size (str, optional): FunASR model name (e.g., paraformer-zh) or whisper size (tiny, base, small, medium, large-v1, large-v2, large-v3)
         verbose (bool): Enable verbose logging
     """
     from wenbi.asr import transcribe_with_engine

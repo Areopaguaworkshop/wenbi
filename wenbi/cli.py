@@ -478,8 +478,11 @@ def add_global_args(subparser):
     subparser.add_argument(
         "--transcribe-model",
         "-tsm",
-        default="1.7B",
+        default="paraformer-zh",
         choices=[
+            "paraformer-zh",
+            "paraformer-en",
+            # Backward-compatible aliases for old Qwen3 defaults
             "1.7B",
             "0.6B",
             "tiny",
@@ -492,7 +495,10 @@ def add_global_args(subparser):
             "large-v3-turbo",
             "turbo",
         ],
-        help="ASR model: 1.7B (Qwen3-ASR default, recommended), 0.6B (Qwen3 fast), or whisper models for fallback",
+        help=(
+            "ASR model: paraformer-zh (FunASR default, recommended), paraformer-en, "
+            "or whisper models for fallback. 1.7B/0.6B are kept as aliases."
+        ),
     )
     subparser.add_argument(
         "--multi-language",
