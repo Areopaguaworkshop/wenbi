@@ -6,6 +6,7 @@ license = "Apache-2.0"
 authors = [{ name = "Ephrem Yuan", email = "areopagusworkshop@gmail.com" }]
 dependencies = [
     "openai-whisper>=20240930",
+    "qwen-asr>=0.0.6",
     "gradio>=5.18.0",
     "moviepy>=2.1.2",
     "pydub>=0.25.1",
@@ -35,7 +36,6 @@ dependencies = [
     "pypdf2>=3.0.1",
     "pymupdf>=1.26.7",
     "deepl>=1.18.0",
-    "pillow>=12.1.1",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"

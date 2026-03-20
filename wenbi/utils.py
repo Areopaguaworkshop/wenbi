@@ -106,7 +106,7 @@ def parse_subtitle(file_path, vtt_file=None, verbose=False):
     return result_df
 
 
-def transcribe(file_path, language=None, output_dir=None, model_size="large-v3", verbose=False):
+def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", verbose=False):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
 
@@ -114,9 +114,11 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3",
         file_path (str): Path to the audio file
         language (str, optional): Language code for transcription
         output_dir (str, optional): Directory to save the VTT file
-        model_size (str, optional): Whisper model size (tiny, base, small, medium, large-v1, large-v2, large-v3)
+        model_size (str, optional): "1.7B" for Qwen3-ASR, or whisper size (tiny, base, small, medium, large-v1, large-v2, large-v3)
         verbose (bool): Enable verbose logging
     """
+    from wenbi.asr import transcribe_with_engine
+    
     logger = logging.getLogger(__name__)
     
     if verbose:
@@ -124,15 +126,13 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3",
         logger.debug(f"Model size: {model_size}")
         logger.debug(f"Language: {language or 'auto-detect'}")
     
-    model = whisper.load_model(f"{model_size}", device="cpu")
-    if verbose:
-        logger.debug(f"Whisper model loaded: {model_size}")
-    
-    result = model.transcribe(
-        file_path, fp16=False, verbose=verbose, language=language if language else None
+    result = transcribe_with_engine(
+        audio_path=file_path,
+        model_size=model_size,
+        language=language,
+        verbose=verbose,
     )
-    detected_language = result.get(
-        "language", language if language else "unknown")
+    detected_language = result.get("language", language if language else "unknown")
 
     if verbose:
         logger.debug(f"Transcription completed. Detected language: {detected_language}")
@@ -144,19 +144,29 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3",
         if verbose and i % 50 == 0:  # Log progress every 50 segments
             logger.debug(f"Processing segment {i+1}/{len(result['segments'])}")
         
+        # Handle both dict and object formats
+        if isinstance(segment, dict):
+            start = segment.get("start", 0)
+            end = segment.get("end", 0)
+            text = segment.get("text", "").strip()
+        else:
+            start = getattr(segment, "start", 0)
+            end = getattr(segment, "end", 0)
+            text = getattr(segment, "text", "").strip()
+        
         # Format timestamps
-        hours = int(segment["start"] // 3600)
-        minutes = int((segment["start"] % 3600) // 60)
-        start_seconds = segment["start"] % 60
-        end_hours = int(segment["end"] // 3600)
-        end_minutes = int((segment["end"] % 3600) // 60)
-        end_seconds = segment["end"] % 60
+        hours = int(start // 3600)
+        minutes = int((start % 3600) // 60)
+        start_seconds = start % 60
+        end_hours = int(end // 3600)
+        end_minutes = int((end % 3600) // 60)
+        end_seconds = end % 60
 
         start_time = f"{hours:02d}:{minutes:02d}:{start_seconds:06.3f}"
         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
 
         vtt_content.append(f"{start_time} --> {end_time}\n")
-        vtt_content.append(f"{segment['text'].strip()}\n\n")
+        vtt_content.append(f"{text}\n\n")
 
     # Determine output file path
     if output_dir is None:
@@ -174,11 +184,21 @@ def transcribe(file_path, language=None, output_dir=None, model_size="large-v3",
     # Create CSV file
     csv_data = []
     for segment in result["segments"]:
-        start_time = f"{int(segment['start'] // 3600):02d}:{int((segment['start'] % 3600) // 60):02d}:{segment['start'] % 60:06.3f}"
-        end_time = f"{int(segment['end'] // 3600):02d}:{int((segment['end'] % 3600) // 60):02d}:{segment['end'] % 60:06.3f}"
+        # Handle both dict and object formats
+        if isinstance(segment, dict):
+            start = segment.get("start", 0)
+            end = segment.get("end", 0)
+            text = segment.get("text", "").strip()
+        else:
+            start = getattr(segment, "start", 0)
+            end = getattr(segment, "end", 0)
+            text = getattr(segment, "text", "").strip()
+        
+        start_time = f"{int(start // 3600):02d}:{int((start % 3600) // 60):02d}:{start % 60:06.3f}"
+        end_time = f"{int(end // 3600):02d}:{int((end % 3600) // 60):02d}:{end % 60:06.3f}"
         csv_data.append({
             "Timestamps": f"{start_time} --> {end_time}",
-            "Content": segment["text"].strip()
+            "Content": text
         })
 
     csv_df = pd.DataFrame(csv_data)

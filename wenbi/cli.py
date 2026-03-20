@@ -478,8 +478,10 @@ def add_global_args(subparser):
     subparser.add_argument(
         "--transcribe-model",
         "-tsm",
-        default="large-v3",
+        default="1.7B",
         choices=[
+            "1.7B",
+            "0.6B",
             "tiny",
             "base",
             "small",
@@ -490,7 +492,7 @@ def add_global_args(subparser):
             "large-v3-turbo",
             "turbo",
         ],
-        help="Whisper model size for transcription (default: large-v3)",
+        help="ASR model: 1.7B (Qwen3-ASR default, recommended), 0.6B (Qwen3 fast), or whisper models for fallback",
     )
     subparser.add_argument(
         "--multi-language",
