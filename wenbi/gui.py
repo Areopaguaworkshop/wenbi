@@ -117,8 +117,8 @@ def create_interface():
                 )
                 llm = gr.Textbox(
                     label="LLM Model",
-                    value="ollama/qwen3",
-                    placeholder="e.g., ollama/qwen3, gemini/gemini-1.5-flash",
+                    value="ollama/qwen3.5:cloud",
+                    placeholder="e.g., ollama/qwen3.5:cloud, gemini/gemini-1.5-flash",
                 )
             with gr.Row():
                 chunk_length = gr.Slider(label="Chunk Length (Sentences)", minimum=1, maximum=50, value=20, step=1)

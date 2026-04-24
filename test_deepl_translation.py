@@ -38,7 +38,7 @@ This is a test
                 test_vtt_path,
                 output_dir=tmpdir,
                 translate_language="French",
-                llm="ollama/qwen3",
+                llm="ollama/qwen3.5:cloud",
                 chunk_length=10,
                 use_deepl=False,  # Force LLM only
                 verbose=True,
@@ -112,7 +112,7 @@ This is a wonderful test.
                     test_vtt_path,
                     output_dir=tmpdir,
                     translate_language="French",
-                    llm="ollama/qwen3",
+                    llm="ollama/qwen3.5:cloud",
                     chunk_length=10,
                     use_deepl=True,
                     verbose=True,
@@ -166,7 +166,7 @@ Hello world
                 test_vtt_path,
                 output_dir=tmpdir,
                 translate_language="French",
-                llm="ollama/qwen3",
+                llm="ollama/qwen3.5:cloud",
                 chunk_length=10,
                 cite_timestamps=True,  # Enable timestamp citation
                 use_deepl=False,  # Use LLM only for predictability

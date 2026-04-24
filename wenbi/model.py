@@ -28,7 +28,7 @@ def configure_lm(model_string, verbose=False, **kwargs):
     dspy = _import_dspy()
 
     if not model_string:
-        model_string = "ollama/qwen3"
+        model_string = "ollama/qwen3.5:cloud"
 
     if verbose:
         logger.debug(f"Configuring LLM: {model_string}")
@@ -115,7 +115,7 @@ def translate(
     input_file,
     output_dir="",
     translate_language="Chinese",
-    llm="ollama/qwen3",
+    llm="ollama/qwen3.5:cloud",
     chunk_length=20,
     max_tokens=50000,
     timeout=3600,
@@ -313,7 +313,7 @@ def rewrite(
     input_file,
     output_dir="",
     rewrite_language="Chinese",
-    llm="ollama/qwen3",
+    llm="ollama/qwen3.5:cloud",
     chunk_length=20,
     max_tokens=50000,
     timeout=3600,
@@ -458,7 +458,7 @@ def rewrite(
 def academic(
     input_file,
     output_dir="",
-    llm="ollama/qwen3",
+    llm="ollama/qwen3.5:cloud",
     academic_lang="English",
     chunk_length=20,
     max_tokens=50000,
@@ -845,7 +845,7 @@ def convert_single_slide_image(
 def combine_speech_and_slides_enhanced(
     speech_markdown,
     slides_markdown,
-    llm="ollama/qwen3",
+    llm="ollama/qwen3.5:cloud",
     output_dir="",
     cite_timestamps=False,
     max_tokens=50000,

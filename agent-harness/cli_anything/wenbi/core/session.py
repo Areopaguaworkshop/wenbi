@@ -10,7 +10,7 @@ class Session:
     """Manages current session state including project and processing history."""
     project_name: str = "default"
     output_dir: str = ""
-    llm: str = "ollama/qwen3"
+    llm: str = "ollama/qwen3.5:cloud"
     lang: str = "Chinese"
     chunk_length: int = 20
     max_tokens: int = 130000

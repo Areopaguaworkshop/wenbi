@@ -150,7 +150,7 @@ def test_translate_without_deepl_key():
                 test_vtt_path,
                 output_dir=tmpdir,
                 translate_language="French",
-                llm="ollama/qwen3",
+                llm="ollama/qwen3.5:cloud",
                 chunk_length=5,
                 use_deepl=True,
                 deepl_key=None,

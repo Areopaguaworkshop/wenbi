@@ -34,7 +34,7 @@ cli-anything-wenbi batch ./media/ --output-dir ./out
 
 # View/set session parameters
 cli-anything-wenbi session show
-cli-anything-wenbi session set llm ollama/qwen3
+cli-anything-wenbi session set llm ollama/qwen3.5:cloud
 cli-anything-wenbi session set lang Japanese
 ```
 
@@ -69,7 +69,7 @@ cli-anything-wenbi
 Save and restore session state:
 
 ```bash
-cli-anything-wenbi session set llm ollama/qwen3
+cli-anything-wenbi session set llm ollama/qwen3.5:cloud
 cli-anything-wenbi session set lang Chinese
 cli-anything-wenbi session save my-session.json
 

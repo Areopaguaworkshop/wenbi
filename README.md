@@ -33,7 +33,7 @@ pip install -e .
 Rewrite:
 
 ```bash
-wenbi rewrite input.mp4 --lang Chinese --llm ollama/qwen3
+wenbi rewrite input.mp4 --lang Chinese --llm ollama/qwen3.5:cloud
 ```
 
 Translate (DeepL first):
@@ -152,7 +152,7 @@ Example:
 ```yaml
 input: lecture.mp4
 output_dir: ./out
-llm: ollama/qwen3
+llm: ollama/qwen3.5:cloud
 lang: Chinese
 chunk_length: 20
 ```
@@ -170,7 +170,7 @@ text, md_file, csv_file, base_name = process_input(
     lang="Chinese",
     use_deepl=True,
     deepl_key="<DEEPL_KEY>",
-    llm="ollama/qwen3",
+    llm="ollama/qwen3.5:cloud",
 )
 ```
 

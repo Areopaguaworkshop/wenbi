@@ -1,10 +1,10 @@
 import dspy
 import litellm
 
-# Register custom model info for qwen3 with higher token limits
+# Register custom model info for qwen3.5:cloud with higher token limits
 # This overrides LiteLLM's default max_tokens of 40960
 litellm.register_model({
-    "ollama/qwen3": {
+    "ollama/qwen3.5:cloud": {
         "max_tokens": 131072,
         "max_input_tokens": 131072,
         "max_output_tokens": 131072,
@@ -16,7 +16,7 @@ litellm.register_model({
     }
 })
 
-def get_ollama_lm(model_name="ollama/qwen3", base_url=None, max_tokens=130000, timeout=3600, temperature=0.1, **kwargs):
+def get_ollama_lm(model_name="ollama/qwen3.5:cloud", base_url=None, max_tokens=130000, timeout=3600, temperature=0.1, **kwargs):
     """
     Configures and returns a dspy.Ollama instance for an Ollama model.
 
@@ -32,7 +32,7 @@ def get_ollama_lm(model_name="ollama/qwen3", base_url=None, max_tokens=130000, t
         dspy.Ollama: An instance of the configured Ollama language model.
     """
     if not model_name:
-        model_name = "ollama/qwen3"
+        model_name = "ollama/qwen3.5:cloud"
 
     config = kwargs
     config.update({

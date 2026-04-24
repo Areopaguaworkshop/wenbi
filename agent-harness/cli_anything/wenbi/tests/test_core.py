@@ -103,14 +103,14 @@ class TestSession(unittest.TestCase):
 
     def test_session_default_creation(self):
         session = Session()
-        self.assertEqual(session.llm, "ollama/qwen3")
+        self.assertEqual(session.llm, "ollama/qwen3.5:cloud")
         self.assertEqual(session.lang, "Chinese")
         self.assertEqual(session.history, [])
 
     def test_session_get_process_params(self):
-        session = Session(llm="ollama/qwen3", lang="Japanese", chunk_length=30)
+        session = Session(llm="ollama/qwen3.5:cloud", lang="Japanese", chunk_length=30)
         params = session.get_process_params()
-        self.assertEqual(params["llm"], "ollama/qwen3")
+        self.assertEqual(params["llm"], "ollama/qwen3.5:cloud")
         self.assertEqual(params["lang"], "Japanese")
         self.assertEqual(params["chunk_length"], 30)
         self.assertNotIn("history", params)
@@ -369,7 +369,7 @@ class TestFormatting(unittest.TestCase):
         self.assertEqual(len(result), 203)
 
     def test_format_session_info(self):
-        info = {"name": "test", "llm": "ollama/qwen3"}
+        info = {"name": "test", "llm": "ollama/qwen3.5:cloud"}
         result = format_session_info(info)
         self.assertIn("name: test", result)
 
@@ -399,7 +399,7 @@ class TestCLI(unittest.TestCase):
     def test_session_show(self):
         result = self.runner.invoke(self.cli, ["session", "show"])
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("ollama/qwen3", result.output)
+        self.assertIn("ollama/qwen3.5:cloud", result.output)
 
     def test_session_set(self):
         result = self.runner.invoke(self.cli, ["session", "set", "lang", "Japanese"])
@@ -423,7 +423,7 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
             self.assertTrue(os.path.exists(path))
             loaded = Session.load(path)
-            self.assertEqual(loaded.llm, "ollama/qwen3")
+            self.assertEqual(loaded.llm, "ollama/qwen3.5:cloud")
 
     def test_session_history_empty(self):
         result = self.runner.invoke(self.cli, ["session", "history"])
@@ -522,7 +522,7 @@ class TestCLISubprocess(unittest.TestCase):
             capture_output=True, text=True, timeout=30
         )
         self.assertEqual(result.returncode, 0)
-        self.assertIn("ollama/qwen3", result.stdout)
+        self.assertIn("ollama/qwen3.5:cloud", result.stdout)
 
     @unittest.skipUnless(
         os.environ.get("CLI_ANYTHING_FORCE_INSTALLED"),
