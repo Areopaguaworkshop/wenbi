@@ -34,7 +34,7 @@ def is_video_audio_or_url(file_path, url):
             ".m4v",
             ".webm",
         )
-        audio_extensions = (".mp3", ".flac", ".aac", ".ogg", ".m4a", ".opus")
+        audio_extensions = (".mp3", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".wav")
         return file_path.lower().endswith(video_extensions + audio_extensions)
 
     return False

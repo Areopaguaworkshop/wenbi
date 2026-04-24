@@ -256,7 +256,7 @@ def is_video_audio_or_url(file_path, url):
             ".m4v",
             ".webm",
         )
-        audio_extensions = (".mp3", ".flac", ".aac", ".ogg", ".m4a", ".opus")
+        audio_extensions = (".mp3", ".flac", ".aac", ".ogg", ".m4a", ".opus", ".wav")
         return file_path.lower().endswith(video_extensions + audio_extensions)
 
     return False
@@ -269,7 +269,7 @@ def validate_transcription_args(args):
 
     # Check for transcription-related arguments
     transcription_args = []
-    if hasattr(args, "transcribe_model") and args.transcribe_model != "large-v3":
+    if hasattr(args, "transcribe_model") and args.transcribe_model != "paraformer-zh":
         transcription_args.append("--transcribe-model")
     if hasattr(args, "multi_language") and args.multi_language:
         transcription_args.append("--multi-language")
