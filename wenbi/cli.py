@@ -306,7 +306,7 @@ def handle_rewrite_command(args):
         "output_dir": args.output_dir or config.get("output_dir", ""),
         "llm": args.llm or config.get("llm", ""),
         "chunk_length": args.chunk_length or config.get("chunk_length", 20),
-        "max_tokens": args.max_tokens or config.get("max_tokens", 130000),
+        "max_tokens": args.max_tokens or config.get("max_tokens", 64000),
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
         "lang": args.lang or config.get("lang", "Chinese"),
@@ -383,7 +383,7 @@ def handle_translate_command(args):
         "output_dir": args.output_dir or config.get("output_dir", ""),
         "llm": args.llm or config.get("llm", ""),
         "chunk_length": args.chunk_length or config.get("chunk_length", 20),
-        "max_tokens": args.max_tokens or config.get("max_tokens", 130000),
+        "max_tokens": args.max_tokens or config.get("max_tokens", 64000),
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
         "lang": args.lang or config.get("lang", "Chinese"),
@@ -457,8 +457,8 @@ def add_global_args(subparser):
         "--max-tokens",
         "-mt",
         type=int,
-        default=130000,
-        help="Maximum tokens for LLM output (default: 130000)",
+        default=64000,
+        help="Maximum tokens for LLM output (default: 64000)",
     )
     subparser.add_argument(
         "--timeout",
@@ -1821,8 +1821,8 @@ def main():
         "--max-tokens",
         "-mt",
         type=int,
-        default=130000,
-        help="Maximum tokens for LLM output (default: 130000)",
+        default=64000,
+        help="Maximum tokens for LLM output (default: 64000)",
     )
     parser.add_argument(
         "--timeout",
@@ -1946,7 +1946,7 @@ def main():
         "lang": args.lang or config.get("lang", "Chinese"),
         "multi_language": args.multi_language or config.get("multi_language", False),
         "chunk_length": args.chunk_length or config.get("chunk_length", 20),
-        "max_tokens": args.max_tokens or config.get("max_tokens", 130000),
+        "max_tokens": args.max_tokens or config.get("max_tokens", 64000),
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
         "transcribe_model": args.transcribe_model

@@ -13,7 +13,7 @@ class Session:
     llm: str = "ollama/qwen3.5:cloud"
     lang: str = "Chinese"
     chunk_length: int = 20
-    max_tokens: int = 130000
+    max_tokens: int = 64000
     timeout: int = 3600
     temperature: float = 0.1
     transcribe_model: str = "paraformer-zh"

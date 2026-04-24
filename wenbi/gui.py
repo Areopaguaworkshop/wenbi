@@ -122,7 +122,7 @@ def create_interface():
                 )
             with gr.Row():
                 chunk_length = gr.Slider(label="Chunk Length (Sentences)", minimum=1, maximum=50, value=20, step=1)
-                max_tokens = gr.Slider(label="Max Tokens", minimum=1000, maximum=150000, value=130000, step=1000)
+                max_tokens = gr.Slider(label="Max Tokens", minimum=1000, maximum=65536, value=64000, step=1000)
             with gr.Row():
                 temperature = gr.Slider(label="Temperature", minimum=0.0, maximum=1.0, value=0.1, step=0.1)
                 timeout = gr.Slider(label="Timeout (seconds)", minimum=60, maximum=7200, value=3600, step=60)

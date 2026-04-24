@@ -5,9 +5,9 @@ import litellm
 # This overrides LiteLLM's default max_tokens of 40960
 litellm.register_model({
     "ollama/qwen3.5:cloud": {
-        "max_tokens": 131072,
+        "max_tokens": 65536,
         "max_input_tokens": 131072,
-        "max_output_tokens": 131072,
+        "max_output_tokens": 65536,
         "input_cost_per_token": 0.0,
         "output_cost_per_token": 0.0,
         "litellm_provider": "ollama",
@@ -16,14 +16,14 @@ litellm.register_model({
     }
 })
 
-def get_ollama_lm(model_name="ollama/qwen3.5:cloud", base_url=None, max_tokens=130000, timeout=3600, temperature=0.1, **kwargs):
+def get_ollama_lm(model_name="ollama/qwen3.5:cloud", base_url=None, max_tokens=64000, timeout=3600, temperature=0.1, **kwargs):
     """
     Configures and returns a dspy.Ollama instance for an Ollama model.
 
     Args:
         model_name (str): The name of the Ollama model to use.
         base_url (str, optional): The base URL for the Ollama API. Defaults to "http://localhost:11434".
-        max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 50000.
+        max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 64000.
         timeout (int, optional): The timeout in seconds for the API request. Defaults to 3600.
         temperature (float, optional): The temperature for sampling. Defaults to 0.1.
         **kwargs: Additional keyword arguments to pass to the dspy.Ollama constructor.
@@ -33,6 +33,9 @@ def get_ollama_lm(model_name="ollama/qwen3.5:cloud", base_url=None, max_tokens=1
     """
     if not model_name:
         model_name = "ollama/qwen3.5:cloud"
+
+    # Clamp max_tokens to the hard ceiling of the qwen3.5 model
+    max_tokens = min(max_tokens, 64000)
 
     config = kwargs
     config.update({
