@@ -11,10 +11,20 @@ build/
 
 # Virtual environments
 .env
+.env.local
+.env.*.local
 .venv
 env/
 venv/
 ENV/
+
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+*.jks
+credentials.json
+service-account*.json
 
 # IDE specific files
 .idea/

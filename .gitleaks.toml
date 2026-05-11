@@ -1,0 +1,16 @@
+# gitleaks configuration
+# https://gitleaks.io/docs/config
+
+[extend]
+useDefault = true
+
+# Global allowlist
+[allowlist]
+description = "Global allow list"
+paths = [
+    '''\.env\.example$''',
+    '''\.gitleaks\.toml$''',
+    '''tests?/.*''',
+    '''test_.*\.py$''',
+    '''agent-harness/.*''',
+]

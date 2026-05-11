@@ -1,0 +1,29 @@
+# Pre-commit hooks for wenbi
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Gitleaks - detect secrets in code
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.0
+    hooks:
+      - id: gitleaks
+
+  # Prevent large files from being committed
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=10240']
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: ['--branch', 'main']
+
+  # Local hook: block API keys in commit messages
+  - repo: local
+    hooks:
+      - id: block-api-keys-in-commits
+        name: Block API keys in commit messages
+        entry: 'bash -c "echo ''$1'' | grep -qiE ''(sk-|api.?key|secret.?key|token.?=.{10,})'' && echo ''ERROR: Commit message may contain API key or secret!'' && exit 1 || exit 0" --'
+        language: system
+        stages: [commit-msg]
