@@ -2,8 +2,7 @@ import os
 import whisper
 import re
 import pandas as pd
-from moviepy.video.io.VideoFileClip import VideoFileClip
-from moviepy.audio.io.AudioFileClip import AudioFileClip
+import subprocess
 from spacy.lang.zh import Chinese
 from spacy.lang.en import English
 import spacy
@@ -887,28 +886,51 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
         logger.debug(f"Output path: {output_path}")
     
     try:
-        # Check if input is video or audio
-        if audio_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm')):
-            if verbose:
-                logger.debug("Processing as video file")
-            with VideoFileClip(audio_path) as video:
-                audio_clip = video.audio
-                if timestamp:
-                    audio_clip = audio_clip.subclip(timestamp['start'], timestamp['end'])
-                audio_clip.write_audiofile(output_path, logger=None)
-        else:
-            if verbose:
-                logger.debug("Processing as audio file")
-            with AudioFileClip(audio_path) as audio:
-                if timestamp:
-                    audio = audio.subclip(timestamp['start'], timestamp['end'])
-                audio.write_audiofile(output_path, logger=None)
-        
+        # Use ffmpeg directly instead of moviepy, which has a bug parsing
+        # videos with chapters (IndexError in FFmpegInfosParser).
+        cmd = [
+            "ffmpeg",
+            "-y",  # overwrite output
+            "-i", audio_path,
+        ]
+
+        if timestamp:
+            cmd += [
+                "-ss", str(timestamp['start']),
+                "-to", str(timestamp['end']),
+            ]
+
+        cmd += [
+            "-vn",                   # no video
+            "-acodec", "pcm_s16le",  # WAV PCM 16-bit
+            "-ar", "16000",          # 16kHz sample rate (optimal for whisper)
+            "-ac", "1",              # mono
+            output_path,
+        ]
+
+        if verbose:
+            logger.debug(f"Running ffmpeg: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        if result.returncode != 0:
+            stderr_output = result.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"ffmpeg failed with return code {result.returncode}: {stderr_output[-500:]}"
+            )
+
+        if not os.path.exists(output_path):
+            raise FileNotFoundError(f"Expected output file not created: {output_path}")
+
         if verbose:
             logger.debug(f"Audio extraction completed: {output_path}")
-        
+
         return output_path
-        
+
     except Exception as e:
         error_msg = f"Error extracting audio: {e}"
         if verbose:
