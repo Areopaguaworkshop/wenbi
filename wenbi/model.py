@@ -348,15 +348,17 @@ def rewrite(
 
     class RewriteSignature(dspy.Signature):
         """
-        Rewrite this text in {target_language} from oral to written.  Follow these rules strictly:
-        1. Correct any basic grammar, punctuation, or usage errors.
-        2. Improve clarity while preserving the original meaning and scholarly tone (trying your best not to change the structure of sentence)
-        3. IMPORTANT: Maintaining the original meaning and length (97% of original)
+        Rewrite this oral/spoken text into formal written prose in {target_language}, suitable for publication as an academic transcript. Follow these rules strictly:
+        1. Remove all oral artifacts: filler words, rhetorical confirmations (对吧/是吧 and equivalents), vague completions (什么的/之类的 and equivalents), self-corrections, half-sentences, and meta-commentary about the conversation itself.
+        2. Rewrite conversational patterns into formal academic prose. Restructure fragmented speech, run-on sentences, and repetitions into clear, concise written sentences.
+        3. Correct any grammar, punctuation, or usage errors.
+        4. IMPORTANT: Preserve the original meaning and scholarly content faithfully. Do not add ideas that were not stated or alter the speaker's intended arguments.
+        5. The resulting text may be 85-100% of the original length, since removing oral artifacts naturally shortens the text.
         """
 
         oral_text = dspy.InputField(desc="Oral or spoken text to be rewritten")
         target_language = dspy.InputField(desc="Target language for the rewriting")
-        written_text = dspy.OutputField(desc="Polished written version of the text")
+        written_text = dspy.OutputField(desc="Formal written version suitable for publication")
 
     rewrite_module = dspy.Predict(RewriteSignature)
 
@@ -494,18 +496,20 @@ def academic(
 
     class AcademicSignature(dspy.Signature):
         """
-        Rewrite this text in formal academic style in {academic_lang}. Follow these rules strictly:
-        1. Correct any basic grammar, punctuation, or usage errors.
-        2. Improve clarity while preserving the original meaning and scholarly tone (trying your best not to change the structure of sentence)
-        3. Maintaining the original meaning and length (97% of original)
-        4. IMPORTANT: Preserve ALL footnote references (e.g., [^1], [^2]) exactly as they appear
+        Rewrite this text into formal academic style in {academic_lang}, suitable for publication. Follow these rules strictly:
+        1. Remove all oral artifacts: filler words, rhetorical confirmations (对吧/是吧 and equivalents), vague completions (什么的/之类的 and equivalents), self-corrections, half-sentences, and meta-commentary about the conversation itself.
+        2. Rewrite conversational patterns into formal academic prose. Restructure fragmented speech, run-on sentences, and repetitions into clear, concise written sentences.
+        3. Correct any grammar, punctuation, or usage errors.
+        4. IMPORTANT: Preserve the original meaning and scholarly content faithfully. Do not add ideas that were not stated or alter the speaker's intended arguments.
+        5. The resulting text may be 85-100% of the original length, since removing oral artifacts naturally shortens the text.
+        6. IMPORTANT: Preserve ALL footnote references (e.g., [^1], [^2]) exactly as they appear.
         """
 
         input_text = dspy.InputField(
             desc="Original text to be transformed into academic style"
         )
         target_language = dspy.InputField(desc="Target language for academic writing")
-        academic_text = dspy.OutputField(desc="Text rewritten in formal academic style")
+        academic_text = dspy.OutputField(desc="Formal academic text suitable for publication")
 
     academic_module = dspy.Predict(AcademicSignature)
 
