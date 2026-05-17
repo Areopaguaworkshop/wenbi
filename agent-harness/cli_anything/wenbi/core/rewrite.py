@@ -20,7 +20,7 @@ def rewrite(input_path: str, session: Session, style: str = "rewrite",
     Args:
         input_path: Path to input file or URL
         session: Current session with parameters
-        style: 'rewrite' or 'academic'
+        style: 'rewrite', 'academic', or 'zh-speaker'
         start_time: Optional start timestamp (HH:MM:SS)
         end_time: Optional end timestamp (HH:MM:SS)
 
@@ -34,7 +34,11 @@ def rewrite(input_path: str, session: Session, style: str = "rewrite",
 
     try:
         params = session.get_process_params()
-        params["subcommand"] = "academic" if style == "academic" else "rewrite"
+        params["subcommand"] = {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite")
+
+        if style == "zh-speaker":
+            params["enable_speakers"] = True
+            params["transcribe_model"] = "paraformer-zh"
 
         # Handle timestamp
         if start_time and end_time:
@@ -54,7 +58,7 @@ def rewrite(input_path: str, session: Session, style: str = "rewrite",
         base_name = result[3] if len(result) > 3 else ""
 
         if text_content and not text_content.startswith("Error"):
-            session.record("rewrite" if style == "rewrite" else "academic",
+            session.record({"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite"),
                            input_path, output_file or "", status="ok")
             return success_result(
                 command=style,

@@ -45,10 +45,19 @@ def is_video_input(input_path: str) -> bool:
 
 
 def process_speech_from_video(video_path: str, output_dir: str, 
-                            cite_timestamps: bool = True, logger=None, verbose=False) -> Tuple[str, str]:
+                            cite_timestamps: bool = True, logger=None, verbose=False,
+                            style: str = None) -> Tuple[str, str]:
     """
     Process video to extract speech content using rewrite subcommand
     Returns: (speech_content, speech_file_path)
+    
+    Args:
+        video_path: Path to video file
+        output_dir: Output directory
+        cite_timestamps: Whether to include timestamps
+        logger: Logger instance
+        verbose: Enable verbose logging
+        style: Rewrite style ('zh-speaker' for speaker diarization, None for default)
     """
     if logger is None:
         logger = logging.getLogger(__name__)
@@ -57,14 +66,19 @@ def process_speech_from_video(video_path: str, output_dir: str,
         logger.debug("Processing speech from video using rewrite subcommand")
     
     try:
-        # Use process_input with rewrite subcommand
+        # Determine subcommand based on style
+        subcommand = {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite")
+        enable_speakers = style == "zh-speaker"
+        
+        # Use process_input with appropriate subcommand
         result = process_input(
             file_path=video_path,
             url="",
-            subcommand="rewrite",
+            subcommand=subcommand,
             output_dir=output_dir,
             cite_timestamps=cite_timestamps,
-            verbose=verbose
+            verbose=verbose,
+            enable_speakers=enable_speakers,
         )
         
         speech_content = result[0]

@@ -81,6 +81,7 @@ def process_input(
     use_deepl=True,  # Use DeepL for translation
     deepl_key=None,  # DeepL API key
     keep_original_lang=False,  # Keep original language alongside translation
+    enable_speakers=False,  # Enable speaker diarization via FunASR cam++
 ):
     """Process input with logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
@@ -96,6 +97,7 @@ def process_input(
         logger.debug(f"LLM: {llm}")
         logger.debug(f"Transcribe model: {transcribe_model}")
         logger.debug(f"Target language: {lang}")
+        logger.debug(f"Enable speakers: {enable_speakers}")
     # Use current directory for CLI, package directory for web interface
     out_dir = (
         output_dir
@@ -193,6 +195,7 @@ def process_input(
                     language=lang_code,
                     output_dir=out_dir,
                     model_size=transcribe_model,
+                    enable_speakers=enable_speakers,
                 )
                 if verbose:
                     logger.debug(f"Transcription completed: {vtt_file}")
@@ -276,6 +279,24 @@ def process_input(
                         )
                         if verbose:
                             logger.debug(f"Academic processing completed")
+                    elif subcommand == "zh-speaker":
+                        if verbose:
+                            logger.debug(f"Speaker-aware rewriting in {lang}...")
+                        rewrite_text, rewrite_file = rewrite(
+                            vtt_file,
+                            output_dir=out_dir,
+                            llm=llm,
+                            rewrite_language=lang,
+                            chunk_length=chunk_length,
+                            max_tokens=max_tokens,
+                            timeout=timeout,
+                            temperature=temperature,
+                            cite_timestamps=cite_timestamps,
+                            style="zh-speaker",
+                        )
+                        if verbose:
+                            logger.debug(f"Speaker-aware rewrite completed: {rewrite_file}")
+                        result = (rewrite_text, rewrite_file)
                     else:
                         result = "Error: Unknown subcommand"
 
@@ -376,6 +397,24 @@ def process_input(
                         temperature=temperature,
                         cite_timestamps=cite_timestamps,
                     )
+                elif subcommand == "zh-speaker":
+                    if verbose:
+                        logger.debug(f"Speaker-aware rewriting in {lang}...")
+                    rewrite_text, rewrite_file = rewrite(
+                        file_path,
+                        output_dir=out_dir,
+                        llm=llm,
+                        rewrite_language=lang,
+                        chunk_length=chunk_length,
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        temperature=temperature,
+                        cite_timestamps=cite_timestamps,
+                        style="zh-speaker",
+                    )
+                    if verbose:
+                        logger.debug(f"Speaker-aware rewrite completed: {rewrite_file}")
+                    result = (rewrite_text, rewrite_file)
                 else:
                     return "Error: Unknown subcommand", None, None, None
 

@@ -229,8 +229,8 @@ def session_history(ctx, limit):
 
 @cli.command("rewrite")
 @click.argument("input_path")
-@click.option("--style", type=click.Choice(["rewrite", "academic"]), default="rewrite",
-              help="Rewrite style: rewrite (default) or academic.")
+@click.option("--style", type=click.Choice(["rewrite", "academic", "zh-speaker"]), default="rewrite",
+              help="Rewrite style: rewrite (default), academic, or zh-speaker (Chinese with speaker diarization).")
 @click.option("--start-time", default="", help="Start timestamp (HH:MM:SS).")
 @click.option("--end-time", default="", help="End timestamp (HH:MM:SS).")
 @click.option("--lang", default="", help="Target language (overrides session).")

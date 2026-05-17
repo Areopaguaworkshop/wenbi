@@ -22,6 +22,8 @@ FUNASR_ZH_WITH_TS = "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-comm
 FUNASR_VAD_ZH = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
 FUNASR_PUNC_ZH = "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch"
 
+FUNASR_SPK_ZH = "iic/speech_campplus_sv_zh-cn_16k-common"
+
 FUNASR_ALIASES = {
     # Backward-compatible aliases for old Qwen3 options
     "1.7B": FUNASR_ZH_WITH_TS,
@@ -45,6 +47,7 @@ def transcribe_with_engine(
     model_size: str = "1.7B",
     language: Optional[str] = None,
     verbose: bool = False,
+    enable_speakers: bool = False,
 ) -> Dict:
     """
     Transcribe audio using FunASR with Whisper fallback.
@@ -54,13 +57,15 @@ def transcribe_with_engine(
         model_size: FunASR model name (e.g., paraformer-zh) or whisper size
         language: Language code or None for auto-detect
         verbose: Enable logging
+        enable_speakers: Enable speaker diarization via cam++ (FunASR only)
 
     Returns:
-        Dict with text, language, segments
+        Dict with text, language, segments (segments may contain 'spk' field
+        when enable_speakers is True)
     """
     if _is_whisper_model(model_size):
         return _transcribe_whisper(audio_path, model_size, language, verbose)
-    return _transcribe_funasr(audio_path, model_size, language, verbose)
+    return _transcribe_funasr(audio_path, model_size, language, verbose, enable_speakers)
 
 
 def _transcribe_funasr(
@@ -68,6 +73,7 @@ def _transcribe_funasr(
     model_size: str,
     language: Optional[str],
     verbose: bool,
+    enable_speakers: bool = False,
 ) -> Dict:
     """Transcribe using FunASR"""
     try:
@@ -80,12 +86,18 @@ def _transcribe_funasr(
         if verbose:
             logger.debug(f"Loading FunASR model: {normalized_model}")
 
-        model = AutoModel(
-            model=normalized_model,
-            vad_model=FUNASR_VAD_ZH,
-            punc_model=FUNASR_PUNC_ZH,
-            device="cuda:0" if torch.cuda.is_available() else "cpu",
-        )
+        model_kwargs = {
+            "model": normalized_model,
+            "vad_model": FUNASR_VAD_ZH,
+            "punc_model": FUNASR_PUNC_ZH,
+            "device": "cuda:0" if torch.cuda.is_available() else "cpu",
+        }
+        if enable_speakers:
+            if verbose:
+                logger.debug(f"Enabling speaker diarization with cam++ model")
+            model_kwargs["spk_model"] = FUNASR_SPK_ZH
+
+        model = AutoModel(**model_kwargs)
 
         if verbose:
             logger.debug("Transcribing with FunASR...")
@@ -149,12 +161,20 @@ def _normalize_funasr_sentence(item: Any) -> Dict:
         start = _normalize_funasr_time(item.get("start", 0.0))
         end = _normalize_funasr_time(item.get("end", 0.0))
         text = item.get("text", "")
-        return {"start": start, "end": end, "text": text}
+        spk = item.get("spk")
+        result = {"start": start, "end": end, "text": text}
+        if spk is not None:
+            result["spk"] = spk
+        return result
 
     start = _normalize_funasr_time(getattr(item, "start", 0.0))
     end = _normalize_funasr_time(getattr(item, "end", 0.0))
     text = getattr(item, "text", "")
-    return {"start": start, "end": end, "text": text}
+    spk = getattr(item, "spk", None)
+    result = {"start": start, "end": end, "text": text}
+    if spk is not None:
+        result["spk"] = spk
+    return result
 
 
 def _normalize_funasr_time(value: Any) -> float:

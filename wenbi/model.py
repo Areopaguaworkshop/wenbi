@@ -312,14 +312,15 @@ def translate(
 def rewrite(
     input_file,
     output_dir="",
-    rewrite_language="Chinese",
     llm="ollama/qwen3.5:cloud",
+    rewrite_language="Chinese",
     chunk_length=20,
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
     cite_timestamps=False,
     verbose=False,
+    style=None,
 ):
     """
     Rewrite oral language to written form using LLM with verbose logging support.
@@ -334,6 +335,8 @@ def rewrite(
         logger.debug(f"Chunk length: {chunk_length}")
         logger.debug(f"Max tokens: {max_tokens}")
         logger.debug(f"Include timestamps: {cite_timestamps}")
+        if style:
+            logger.debug(f"Style: {style}")
 
     # Configure LLM
     lm = configure_lm(
@@ -346,27 +349,46 @@ def rewrite(
 
     dspy = _import_dspy()
 
-    class RewriteSignature(dspy.Signature):
-        """
-        Rewrite this oral/spoken text into formal written prose in {target_language}, suitable for publication as an academic transcript. Follow these rules strictly:
-        1. Remove all oral artifacts: filler words, rhetorical confirmations (对吧/是吧 and equivalents), vague completions (什么的/之类的 and equivalents), self-corrections, half-sentences, and meta-commentary about the conversation itself.
-        2. Rewrite conversational patterns into formal academic prose. Restructure fragmented speech, run-on sentences, and repetitions into clear, concise written sentences.
-        3. Correct any grammar, punctuation, or usage errors.
-        4. IMPORTANT: Preserve the original meaning and scholarly content faithfully. Do not add ideas that were not stated or alter the speaker's intended arguments.
-        5. The resulting text may be 85-100% of the original length, since removing oral artifacts naturally shortens the text.
-        """
+    # Select signature based on style
+    if style == "zh-speaker":
+        class SpeakerRewriteSignature(dspy.Signature):
+            """
+            Rewrite this multi-speaker transcript into formal written prose in {target_language}, suitable for publication. Preserve speaker distinctions. Follow these rules strictly:
+            1. Keep speaker labels — note who said what. Use 【主持人】for the host/moderator and 【嘉宾】for the guest, or maintain the original Speaker0/Speaker1 labels if speaker roles are unclear.
+            2. Remove oral artifacts per speaker: filler words (嗯, 啊, 对吧, 是吧 and equivalents), vague completions (什么的/之类), self-corrections, half-sentences, and meta-commentary about the conversation.
+            3. Rewrite each speaker's conversational patterns into formal written prose, but maintain the turn-taking structure so readers can follow who said what.
+            4. Correct grammar, punctuation, and usage errors within each speaker's turn.
+            5. IMPORTANT: Preserve the original meaning and scholarly content faithfully. Do not add ideas that were not stated or alter any speaker's intended arguments.
+            6. The resulting text should read like a polished interview transcript or dialogue-based academic text.
+            """
 
-        oral_text = dspy.InputField(desc="Oral or spoken text to be rewritten")
-        target_language = dspy.InputField(desc="Target language for the rewriting")
-        written_text = dspy.OutputField(desc="Formal written version suitable for publication")
+            speaker_text = dspy.InputField(desc="Multi-speaker transcript with speaker labels (e.g., 【Speaker0】, 【Speaker1】)")
+            target_language = dspy.InputField(desc="Target language for the rewriting")
+            written_text = dspy.OutputField(desc="Formal written version preserving speaker attribution and turn structure")
 
-    rewrite_module = dspy.Predict(RewriteSignature)
+        rewrite_module = dspy.Predict(SpeakerRewriteSignature)
+    else:
+        class RewriteSignature(dspy.Signature):
+            """
+            Rewrite this oral/spoken text into formal written prose in {target_language}, suitable for publication as an academic transcript. Follow these rules strictly:
+            1. Remove all oral artifacts: filler words, rhetorical confirmations (对吧/是吧 and equivalents), vague completions (什么的/之类的 and equivalents), self-corrections, half-sentences, and meta-commentary about the conversation itself.
+            2. Rewrite conversational patterns into formal academic prose. Restructure fragmented speech, run-on sentences, and repetitions into clear, concise written sentences.
+            3. Correct any grammar, punctuation, or usage errors.
+            4. IMPORTANT: Preserve the original meaning and scholarly content faithfully. Do not add ideas that were not stated or alter the speaker's intended arguments.
+            5. The resulting text may be 85-100% of the original length, since removing oral artifacts naturally shortens the text.
+            """
+
+            oral_text = dspy.InputField(desc="Oral or spoken text to be rewritten")
+            target_language = dspy.InputField(desc="Target language for the rewriting")
+            written_text = dspy.OutputField(desc="Formal written version suitable for publication")
+
+        rewrite_module = dspy.Predict(RewriteSignature)
 
     if verbose:
-        logger.debug("LLM rewrite module initialized")
+        logger.debug(f"LLM rewrite module initialized (style={style or 'default'})")
 
     # Read and segment the input text
-    segmented_text = segment(input_file, chunk_length, cite_timestamps, verbose=verbose)
+    segmented_text = segment(input_file, chunk_length, cite_timestamps, verbose=verbose, style=style)
 
     # Split into chunks for processing
     chunks = segmented_text.split("\n\n")
@@ -411,9 +433,14 @@ def rewrite(
                 continue
 
             # Rewrite the content
-            result = rewrite_module(
-                oral_text=content_to_rewrite, target_language=rewrite_language
-            )
+            if style == "zh-speaker":
+                result = rewrite_module(
+                    speaker_text=content_to_rewrite, target_language=rewrite_language
+                )
+            else:
+                result = rewrite_module(
+                    oral_text=content_to_rewrite, target_language=rewrite_language
+                )
             rewritten_content = result.written_text
 
             # Reconstruct chunk with timestamp header if it was extracted

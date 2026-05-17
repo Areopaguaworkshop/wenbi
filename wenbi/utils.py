@@ -105,7 +105,7 @@ def parse_subtitle(file_path, vtt_file=None, verbose=False):
     return result_df
 
 
-def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", verbose=False):
+def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", verbose=False, enable_speakers=False):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
 
@@ -115,6 +115,7 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
         output_dir (str, optional): Directory to save the VTT file
         model_size (str, optional): FunASR model name (e.g., paraformer-zh) or whisper size (tiny, base, small, medium, large-v1, large-v2, large-v3)
         verbose (bool): Enable verbose logging
+        enable_speakers (bool): Enable speaker diarization (FunASR cam++ only)
     """
     from wenbi.asr import transcribe_with_engine
     
@@ -124,18 +125,23 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
         logger.debug(f"Starting transcription of: {file_path}")
         logger.debug(f"Model size: {model_size}")
         logger.debug(f"Language: {language or 'auto-detect'}")
+        logger.debug(f"Enable speakers: {enable_speakers}")
     
     result = transcribe_with_engine(
         audio_path=file_path,
         model_size=model_size,
         language=language,
         verbose=verbose,
+        enable_speakers=enable_speakers,
     )
     detected_language = result.get("language", language if language else "unknown")
 
     if verbose:
         logger.debug(f"Transcription completed. Detected language: {detected_language}")
         logger.debug(f"Number of segments: {len(result['segments'])}")
+        has_speakers = any(s.get("spk") is not None for s in result["segments"] if isinstance(s, dict))
+        if has_speakers:
+            logger.debug("Speaker diarization data present in segments")
 
     # Create VTT content with proper timestamps
     vtt_content = ["WEBVTT\n"]
@@ -148,10 +154,12 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
             start = segment.get("start", 0)
             end = segment.get("end", 0)
             text = segment.get("text", "").strip()
+            spk = segment.get("spk")
         else:
             start = getattr(segment, "start", 0)
             end = getattr(segment, "end", 0)
             text = getattr(segment, "text", "").strip()
+            spk = getattr(segment, "spk", None)
         
         # Format timestamps
         hours = int(start // 3600)
@@ -165,7 +173,10 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
         end_time = f"{end_hours:02d}:{end_minutes:02d}:{end_seconds:06.3f}"
 
         vtt_content.append(f"{start_time} --> {end_time}\n")
-        vtt_content.append(f"{text}\n\n")
+        if spk is not None:
+            vtt_content.append(f"<v Speaker{spk}>{text}</v>\n\n")
+        else:
+            vtt_content.append(f"{text}\n\n")
 
     # Determine output file path
     if output_dir is None:
@@ -211,7 +222,7 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
     return vtt_file_path, csv_file_path
 
 
-def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
+def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False, style=None):
     """
     Segments text into paragraphs with a fixed number of sentences.
     
@@ -220,6 +231,7 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         sentence_count (int): Number of sentences per paragraph
         cite_timestamps (bool): Whether to include timestamp headers
         verbose (bool): Enable verbose logging
+        style (str, optional): Rewrite style ('zh-speaker' enables speaker-aware grouping)
     """
     logger = logging.getLogger(__name__)
     
@@ -227,6 +239,8 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         logger.debug(f"Starting text segmentation: {file_path}")
         logger.debug(f"Sentences per paragraph: {sentence_count}")
         logger.debug(f"Include timestamps: {cite_timestamps}")
+        if style:
+            logger.debug(f"Segmentation style: {style}")
     
     try:
         # Check if file is markdown or plain text (not subtitle format)
@@ -249,6 +263,12 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         
         if verbose:
             logger.debug(f"Parsed {len(vtt_df)} segments")
+        
+        # Speaker-aware segmentation for zh-speaker style
+        if style == "zh-speaker":
+            if verbose:
+                logger.debug("Using speaker-aware segmentation")
+            return _segment_with_speakers(vtt_df, sentence_count, cite_timestamps, verbose=verbose)
         
         if cite_timestamps and not vtt_df.empty and vtt_df['Timestamps'].notna().any():
             if verbose:
@@ -331,6 +351,119 @@ def segment(file_path, sentence_count=20, cite_timestamps=False, verbose=False):
         if verbose:
             logger.debug(error_msg)
         return error_msg
+
+
+def _extract_speaker_from_content(content):
+    """Extract speaker label from VTT voice tag like <v Speaker0>text</v>"""
+    match = re.match(r'<v\s+([^>]+)>(.+)</v>', content, re.DOTALL)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    return None, content.strip()
+
+
+def _segment_with_speakers(vtt_df, sentence_count, cite_timestamps, verbose=False):
+    """
+    Segment text preserving speaker turns from <v SpeakerN> tags.
+    Groups consecutive same-speaker segments and formats them with speaker labels.
+    """
+    logger = logging.getLogger(__name__)
+    
+    if vtt_df.empty:
+        return ""
+    
+    # Extract speaker info from Content column
+    segments_with_speakers = []
+    for idx, row in vtt_df.iterrows():
+        content = str(row.get("Content", "")).strip()
+        timestamp = str(row.get("Timestamps", "")).strip()
+        
+        if not content:
+            continue
+        
+        speaker, text = _extract_speaker_from_content(content)
+        segments_with_speakers.append({
+            "speaker": speaker,
+            "text": text,
+            "timestamp": timestamp,
+        })
+    
+    if not segments_with_speakers:
+        # No segments found, fall back to regular content
+        all_content = " ".join(vtt_df["Content"].astype(str))
+        return all_content
+    
+    # Check if any speaker tags were found
+    has_speakers = any(s["speaker"] is not None for s in segments_with_speakers)
+    
+    if not has_speakers:
+        # No speaker tags, fall back to regular segmentation
+        if verbose:
+            logger.debug("No speaker tags found, falling back to regular segmentation")
+        all_content = " ".join(vtt_df["Content"].astype(str))
+        return all_content
+    
+    if verbose:
+        unique_speakers = set(s["speaker"] for s in segments_with_speakers if s["speaker"] is not None)
+        logger.debug(f"Found {len(unique_speakers)} speakers: {unique_speakers}")
+    
+    # Group consecutive same-speaker segments into speaker turns
+    speaker_turns = []
+    current_speaker = None
+    current_texts = []
+    current_timestamps = []
+    
+    for seg in segments_with_speakers:
+        speaker = seg["speaker"] or "Speaker0"
+        text = seg["text"]
+        timestamp = seg["timestamp"]
+        
+        if speaker != current_speaker:
+            # New speaker turn
+            if current_texts:
+                speaker_turns.append({
+                    "speaker": current_speaker,
+                    "text": " ".join(current_texts),
+                    "timestamp_start": current_timestamps[0] if current_timestamps else "",
+                    "timestamp_end": current_timestamps[-1] if current_timestamps else "",
+                })
+            current_speaker = speaker
+            current_texts = [text]
+            current_timestamps = [timestamp]
+        else:
+            current_texts.append(text)
+            current_timestamps.append(timestamp)
+    
+    # Don't forget the last turn
+    if current_texts:
+        speaker_turns.append({
+            "speaker": current_speaker,
+            "text": " ".join(current_texts),
+            "timestamp_start": current_timestamps[0] if current_timestamps else "",
+            "timestamp_end": current_timestamps[-1] if current_timestamps else "",
+        })
+    
+    # Format output with speaker labels
+    paragraphs = []
+    for turn in speaker_turns:
+        text = turn["text"]
+        # Remove repeated patterns within each speaker turn
+        pattern = r"(([\\u4e00-\\u9fa5。！？；：""（）【】《》、]{1,5}))(\\s?\\1)+"
+        text = re.sub(pattern, r"\\1", text)
+        
+        if cite_timestamps and turn["timestamp_start"]:
+            ts = turn["timestamp_start"]
+            if "-->" in ts:
+                parts = ts.split(" --> ")
+                start = parts[0].split(".")[0] if "." in parts[0] else parts[0].split(",")[0]
+                end_parts = parts[1] if len(parts) > 1 else ""
+                end = end_parts.split(".")[0] if "." in end_parts else end_parts.split(",")[0] if "," in end_parts else end_parts
+                paragraphs.append(f"### **{start} - {end}**\n\n【{turn['speaker']}】{text}")
+            else:
+                paragraphs.append(f"【{turn['speaker']}】{text}")
+        else:
+            paragraphs.append(f"【{turn['speaker']}】{text}")
+    
+    return "\n\n".join(paragraphs)
 
 
 def _segment_with_timestamps(vtt_df, sentence_count, verbose=False):

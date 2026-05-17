@@ -310,9 +310,9 @@ def handle_rewrite_command(args):
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
         "lang": args.lang or config.get("lang", "Chinese"),
-        "subcommand": "academic" if style == "academic" else "rewrite",
-        "transcribe_model": args.transcribe_model
-        or config.get("transcribe_model", "large-v3"),
+        "subcommand": {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite"),
+        "enable_speakers": style == "zh-speaker",
+        "transcribe_model": "paraformer-zh" if style == "zh-speaker" else (args.transcribe_model or config.get("transcribe_model", "large-v3")),
         "multi_language": args.multi_language or config.get("multi_language", False),
         "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
         "output_wav": args.output_wav or config.get("output_wav", ""),
@@ -352,6 +352,15 @@ def handle_rewrite_command(args):
             print("Academic rewriting completed successfully!")
             print("Output file:", output_file)
             print("You can find the academic text in:", output_file)
+        elif style == "zh-speaker":
+            output_dir = params["output_dir"] or os.getcwd()
+            base_name = result[3] or os.path.splitext(os.path.basename(args.input))[0]
+            output_file = os.path.join(output_dir, f"{base_name}_zh_speaker.md")
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(result[0])
+            print("Speaker-aware rewriting completed successfully!")
+            print("Output file:", output_file)
+            print("You can find the speaker-attributed text in:", output_file)
         else:
             print("Rewrite completed successfully!")
             print("Output file:", result[1] if result[1] else "Text output only")
@@ -1035,12 +1044,14 @@ def handle_ppt_command(args):
                 "timeout": args.timeout,
                 "temperature": args.temperature,
                 "lang": args.lang,
-                "transcribe_model": args.transcribe_model,
+                "transcribe_model": "paraformer-zh" if getattr(args, 'style', None) == "zh-speaker" else args.transcribe_model,
                 "multi_language": args.multi_language,
                 "transcribe_lang": args.transcribe_lang,
                 "cite_timestamps": cite_timestamps,
                 "verbose": args.verbose,
                 "subcommand": "rewrite",
+                "enable_speakers": getattr(args, 'style', None) == "zh-speaker",
+                "style": getattr(args, 'style', None),
             }
 
             result = process_input(file_path=video_path, url="", **params)
@@ -1667,9 +1678,9 @@ def main():
         add_global_args(rewrite_parser)
         rewrite_parser.add_argument(
             "--style",
-            choices=["rewrite", "academic"],
+            choices=["rewrite", "academic", "zh-speaker"],
             default="rewrite",
-            help="Rewrite style: rewrite (default) or academic",
+            help="Rewrite style: rewrite (default), academic, or zh-speaker (Chinese with speaker diarization)",
         )
         rewrite_parser.set_defaults(func=handle_rewrite_command)
 
@@ -1771,6 +1782,12 @@ def main():
             action="store_true",
             default=False,
             help="Keep timestamps and image references in final output",
+        )
+        ppt_parser.add_argument(
+            "--style",
+            choices=["rewrite", "academic", "zh-speaker"],
+            default="rewrite",
+            help="Rewrite style: rewrite (default), academic, or zh-speaker (Chinese with speaker diarization)",
         )
         ppt_parser.set_defaults(func=handle_ppt_command)
 
