@@ -1036,6 +1036,8 @@ def handle_ppt_command(args):
             if args.verbose:
                 logger.debug("Step 3: Processing audio...")
 
+            style = getattr(args, 'style', None) or 'rewrite'
+
             params = {
                 "output_dir": output_dir,
                 "llm": args.llm,
@@ -1044,14 +1046,13 @@ def handle_ppt_command(args):
                 "timeout": args.timeout,
                 "temperature": args.temperature,
                 "lang": args.lang,
-                "transcribe_model": "paraformer-zh" if getattr(args, 'style', None) == "zh-speaker" else args.transcribe_model,
+                "transcribe_model": "paraformer-zh" if style == "zh-speaker" else args.transcribe_model,
                 "multi_language": args.multi_language,
                 "transcribe_lang": args.transcribe_lang,
                 "cite_timestamps": cite_timestamps,
                 "verbose": args.verbose,
-                "subcommand": "rewrite",
-                "enable_speakers": getattr(args, 'style', None) == "zh-speaker",
-                "style": getattr(args, 'style', None),
+                "subcommand": {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite"),
+                "enable_speakers": style == "zh-speaker",
             }
 
             result = process_input(file_path=video_path, url="", **params)
