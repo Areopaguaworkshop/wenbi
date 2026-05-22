@@ -300,6 +300,14 @@ def transcribe_with_gladia(
     """Transcribe with Gladia pre-recorded code switching."""
     import requests
 
+    def raise_for_gladia_error(response: requests.Response) -> None:
+        if response.ok:
+            return
+        body = response.text[:1000]
+        raise RuntimeError(
+            f"Gladia API error {response.status_code} for {response.url}: {body}"
+        )
+
     headers = {"x-gladia-key": api_key}
     if verbose:
         logger.debug("Uploading audio to Gladia")
@@ -307,10 +315,10 @@ def transcribe_with_gladia(
         upload_response = requests.post(
             "https://api.gladia.io/v2/upload",
             headers=headers,
-            files={"audio": (os.path.basename(audio_path), audio_file)},
+            files={"audio": (os.path.basename(audio_path), audio_file, "audio/wav")},
             timeout=120,
         )
-    upload_response.raise_for_status()
+    raise_for_gladia_error(upload_response)
     audio_url = upload_response.json()["audio_url"]
 
     payload: dict[str, Any] = {
@@ -333,7 +341,7 @@ def transcribe_with_gladia(
         json=payload,
         timeout=60,
     )
-    job_response.raise_for_status()
+    raise_for_gladia_error(job_response)
     job = job_response.json()
     result_url = job.get("result_url") or f"https://api.gladia.io/v2/pre-recorded/{job['id']}"
 
@@ -341,7 +349,7 @@ def transcribe_with_gladia(
     result: dict[str, Any] = {}
     while time.time() < deadline:
         poll_response = requests.get(result_url, headers=headers, timeout=60)
-        poll_response.raise_for_status()
+        raise_for_gladia_error(poll_response)
         result = poll_response.json()
         status = result.get("status")
         if verbose:
