@@ -444,6 +444,56 @@ def handle_translate_command(args):
         print(f"Error: {e}")
 
 
+def handle_en_zh_command(args):
+    """Handle the en-zh bilingual source extraction and translation command"""
+    logger = setup_logging(args.verbose)
+
+    if args.verbose:
+        logger.debug("Starting en-zh command")
+        logger.debug(f"Input: {args.input}")
+        logger.debug(f"ASR provider: {args.asr_provider}")
+
+    from wenbi.bilingual import process_en_zh
+
+    try:
+        result = process_en_zh(
+            input_path=args.input,
+            output_dir=args.output_dir,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            asr_provider=args.asr_provider,
+            transcribe_model=args.transcribe_model,
+            source_lang=args.source_lang,
+            interpreter_lang=args.interpreter_lang,
+            target_language=args.lang or "Chinese",
+            llm=args.llm or "ollama/qwen3.5:cloud",
+            chunk_length=args.chunk_length,
+            max_tokens=args.max_tokens,
+            timeout=args.timeout,
+            temperature=args.temperature,
+            deepl_key=args.deepl_key,
+            gladia_key=args.gladia_key,
+            speaker_labels=args.speaker_labels,
+            save_json=args.save_json,
+            verbose=args.verbose,
+        )
+    except Exception as e:
+        if args.verbose:
+            logger.exception("Unexpected error during en-zh processing")
+        print(f"Error: {e}")
+        return
+
+    print("English-to-Chinese bilingual processing completed successfully!")
+    print("ASR provider:", result.provider)
+    print("Kept English segments:", result.kept_segments)
+    print("Dropped non-English segments:", result.dropped_segments)
+    print("English VTT:", result.english_vtt)
+    print("English Markdown:", result.english_md)
+    print("Bilingual Markdown:", result.bilingual_md)
+    if result.diagnostics_json:
+        print("Diagnostics JSON:", result.diagnostics_json)
+
+
 def add_global_args(subparser):
     """Add common arguments to subparsers"""
     subparser.add_argument("input", help="Path to input file or URL")
@@ -1656,7 +1706,7 @@ def main():
     print("Debug: download_all completed")
 
     # Check if this is a subcommand
-    subcommands = ["rewrite", "rw", "translate", "tr", "ppt", "p"]
+    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "ppt", "p"]
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
     print(f"Debug: sys.argv = {sys.argv}")
     print(f"Debug: is_subcommand = {is_subcommand}")
@@ -1691,6 +1741,57 @@ def main():
         )
         add_global_args(translate_parser)
         translate_parser.set_defaults(func=handle_translate_command)
+
+        # English-to-Chinese bilingual audio subcommand
+        en_zh_parser = subparsers.add_parser(
+            "en-zh",
+            aliases=["enzh"],
+            help="Extract English from English/Chinese bilingual audio and translate it to Chinese",
+        )
+        add_global_args(en_zh_parser)
+        en_zh_parser.add_argument(
+            "--asr-provider",
+            choices=["auto", "gladia", "sensevoice", "whisper"],
+            default="auto",
+            help="ASR backend for bilingual separation (default: auto)",
+        )
+        en_zh_parser.add_argument(
+            "--source-lang",
+            default="en",
+            help="Source language to keep from the bilingual audio (default: en)",
+        )
+        en_zh_parser.add_argument(
+            "--interpreter-lang",
+            default="zh",
+            help="Interpreter language to drop from the source transcript (default: zh)",
+        )
+        en_zh_parser.add_argument(
+            "--gladia-key",
+            default="",
+            help="Gladia API key (uses GLADIA_API_KEY env var if not provided)",
+        )
+        en_zh_parser.add_argument(
+            "--speaker-labels",
+            action="store_true",
+            default=True,
+            help="Request speaker labels when the ASR provider supports them (default: enabled)",
+        )
+        en_zh_parser.add_argument(
+            "--no-speaker-labels",
+            dest="speaker_labels",
+            action="store_false",
+            help="Disable speaker labels",
+        )
+        en_zh_parser.add_argument(
+            "--save-json",
+            action="store_true",
+            default=False,
+            help="Save normalized segment diagnostics and raw provider JSON when available",
+        )
+        en_zh_parser.set_defaults(
+            func=handle_en_zh_command,
+            transcribe_model="large-v3-turbo",
+        )
 
         # PPT subcommand - extract slides from video and combine with speech
         ppt_parser = subparsers.add_parser(
