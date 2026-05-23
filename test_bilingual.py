@@ -8,6 +8,8 @@ from wenbi.bilingual import (
     seconds_to_vtt_time,
     write_bilingual_markdown,
     write_english_markdown,
+    write_rewritten_markdown,
+    write_gladia_vtt,
     write_vtt,
 )
 
@@ -97,7 +99,7 @@ def test_markdown_and_vtt_writers(tmp_path):
 
     write_vtt(segments, str(vtt_path))
     write_english_markdown(segments, str(en_path))
-    write_bilingual_markdown(segments, ["中文译文。"], str(bilingual_path))
+    write_bilingual_markdown(["English source."], ["中文译文。"], str(bilingual_path))
 
     assert "<v Speaker 1>English source.</v>" in vtt_path.read_text(encoding="utf-8")
     assert "### **00:00:05 - 00:00:10** · Speaker 1" in en_path.read_text(encoding="utf-8")
@@ -105,8 +107,36 @@ def test_markdown_and_vtt_writers(tmp_path):
     assert "**[English]**" in bilingual
     assert "**[中文]**" in bilingual
     assert "中文译文。" in bilingual
+    # Verify no timestamps or speaker labels in bilingual output
+    assert "### **" not in bilingual
+    assert "Speaker" not in bilingual
 
 
 def test_diagnostics_payload_is_json_serializable():
     payload = {"kept_segments": [{"start": 0, "end": 1, "text": "Hi", "language": "en"}]}
     assert json.loads(json.dumps(payload, ensure_ascii=False))["kept_segments"][0]["text"] == "Hi"
+
+
+def test_rewritten_markdown(tmp_path):
+    paragraphs = ["First paragraph.", "Second paragraph.", "Third one."]
+    path = tmp_path / "rewritten.md"
+    write_rewritten_markdown(paragraphs, str(path))
+    content = path.read_text(encoding="utf-8")
+    assert "First paragraph." in content
+    assert "Second paragraph." in content
+    assert "---" in content
+
+
+def test_bilingual_markdown_no_timestamps(tmp_path):
+    paragraphs = ["Hello world.", "Goodbye."]
+    translations = ["你好世界。", "再见。"]
+    path = tmp_path / "bilingual.md"
+    write_bilingual_markdown(paragraphs, translations, str(path))
+    content = path.read_text(encoding="utf-8")
+    assert "**[English]**" in content
+    assert "**[中文]**" in content
+    assert "你好世界。" in content
+    # No timestamps or speaker labels
+    assert "### **" not in content
+    assert "Speaker" not in content
+    assert "---" in content

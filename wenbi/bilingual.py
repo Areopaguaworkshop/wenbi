@@ -30,6 +30,8 @@ class EnZhResult:
     provider: str
     kept_segments: int
     dropped_segments: int
+    gladia_vtt: str | None = None
+    english_rewritten_md: str | None = None
 
 
 def seconds_to_vtt_time(seconds: float) -> str:
@@ -155,22 +157,24 @@ def write_english_markdown(segments: list[dict[str, Any]], output_path: str) -> 
         f.write("\n\n".join(parts))
 
 
+def write_rewritten_markdown(paragraphs: list[str], output_path: str) -> None:
+    """Write rewritten English paragraphs as clean prose markdown."""
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n\n---\n\n".join(p.strip() for p in paragraphs if p.strip()))
+
+
 def write_bilingual_markdown(
-    segments: list[dict[str, Any]], translations: list[str], output_path: str
+    paragraphs: list[str], translations: list[str], output_path: str
 ) -> None:
-    """Write side-by-side English/Chinese markdown."""
+    """Write side-by-side English/Chinese markdown as clean prose.
+
+    No timestamps, no speaker labels. Topic paragraphs separated by ---.
+    """
     parts: list[str] = []
-    for segment, translation in zip(segments, translations):
-        start = seconds_to_display_time(float(segment.get("start") or 0))
-        end = seconds_to_display_time(float(segment.get("end") or 0))
-        speaker = segment.get("speaker")
-        header = f"### **{start} - {end}**"
-        if speaker:
-            header += f" · {speaker}"
-        english = str(segment.get("text") or "").strip()
+    for english, translation in zip(paragraphs, translations):
+        english_text = english.strip() if isinstance(english, str) else str(english).strip()
         parts.append(
-            f"{header}\n\n"
-            f"**[English]**\n{english}\n\n"
+            f"**[English]**\n{english_text}\n\n"
             f"**[中文]**\n{translation.strip()}"
         )
 
@@ -259,6 +263,125 @@ def translate_chunks(
         translations.append(translated_text)
 
     return translations
+
+
+def group_into_topics(
+    segments: list[dict[str, Any]],
+    llm: str = "ollama/qwen3.5:cloud",
+    max_tokens: int = 64000,
+    timeout: int = 3600,
+    temperature: float = 0.1,
+    verbose: bool = False,
+) -> list[str]:
+    """Group merged transcript segments into topic-coherent paragraphs via LLM.
+
+    Preserves 100% of original text — only groups adjacent segments by topic
+    and marks paragraph breaks with '---'.
+    """
+    from wenbi.model import _import_dspy, configure_lm
+
+    configure_lm(
+        llm,
+        verbose=verbose,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+    )
+    dspy = _import_dspy()
+
+    class TopicGroupSignature(dspy.Signature):
+        """Group transcript segments into topic-coherent paragraphs.
+
+        Preserve ALL original text exactly. Only group adjacent segments by
+        topic coherence. Mark paragraph breaks between topic groups with '---'
+        on its own line. Do NOT add, remove, or rephrase any text.
+        """
+
+        transcript = dspy.InputField(
+            desc="Segmented transcript with numbered segment markers"
+        )
+        grouped = dspy.OutputField(
+            desc="Topic-grouped paragraphs using same text, paragraph breaks marked with ---"
+        )
+
+    # Build the transcript input with segment markers
+    indexed_lines: list[str] = []
+    for i, seg in enumerate(segments, 1):
+        indexed_lines.append(f"[{i}] {str(seg.get('text') or '').strip()}")
+    transcript_text = "\n".join(indexed_lines)
+
+    if verbose:
+        logger.debug("Grouping %d segments into topic paragraphs", len(segments))
+
+    module = dspy.Predict(TopicGroupSignature)
+    result = module(transcript=transcript_text)
+
+    if verbose:
+        logger.debug("Topic grouping complete")
+
+    # Split on '---' to get topic paragraphs
+    paragraphs = [p.strip() for p in result.grouped.split("---") if p.strip()]
+    return paragraphs
+
+
+def rewrite_english(
+    paragraphs: list[str],
+    llm: str = "ollama/qwen3.5:cloud",
+    max_tokens: int = 64000,
+    timeout: int = 3600,
+    temperature: float = 0.1,
+    verbose: bool = False,
+) -> list[str]:
+    """Remove oral fillers and fix grammar conservatively via LLM.
+
+    Removes: um, uh, you know, like (filler), false starts, obvious fragments.
+    Fixes: grammar, unify broken sentences.
+    Keeps 97% original wording — does NOT restructure or rephrase.
+    """
+    from wenbi.model import _import_dspy, configure_lm
+
+    configure_lm(
+        llm,
+        verbose=verbose,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+    )
+    dspy = _import_dspy()
+
+    class CleanEnglishSignature(dspy.Signature):
+        """Remove oral fillers and fix grammar. Keep 97% original wording.
+
+        Remove: um, uh, you know, like (as filler), false starts, obvious fragments.
+        Fix: grammar, unify broken sentences.
+        Do NOT restructure or rephrase. Preserve the original voice and style.
+        """
+
+        english_text = dspy.InputField(desc="Raw English transcript paragraph")
+        cleaned = dspy.OutputField(
+            desc="Cleaned English preserving 97% original wording"
+        )
+
+    module = dspy.Predict(CleanEnglishSignature)
+
+    rewritten: list[str] = []
+    for i, paragraph in enumerate(paragraphs, 1):
+        if verbose:
+            logger.debug("Rewriting paragraph %d/%d", i, len(paragraphs))
+        try:
+            result = module(english_text=paragraph)
+            rewritten.append(result.cleaned.strip())
+        except Exception as e:
+            logger.warning("Rewrite failed for paragraph %d: %s", i, e)
+            rewritten.append(paragraph)
+
+    return rewritten
+
+
+def write_gladia_vtt(raw_result: dict[str, Any], output_path: str) -> None:
+    """Write the raw Gladia API response as a WebVTT file (cue-level, no merging)."""
+    segments = normalize_gladia_utterances(raw_result)
+    write_vtt(segments, output_path)
 
 
 def normalize_gladia_utterances(response: dict[str, Any]) -> list[dict[str, Any]]:
@@ -497,7 +620,7 @@ def process_en_zh(
     output_dir: str = "",
     start_time: str = "",
     end_time: str = "",
-    asr_provider: str = "auto",
+    asr_provider: str = "gladia",
     transcribe_model: str = "large-v3-turbo",
     source_lang: str = "en",
     interpreter_lang: str = "zh",
@@ -538,6 +661,7 @@ def process_en_zh(
     diagnostics_path = os.path.join(out_dir, f"{base_name}{suffix}_en_zh_segments.json") if save_json else None
     provider = asr_provider
     segments: list[dict[str, Any]]
+    gladia_raw_result: dict[str, Any] | None = None
 
     if asr_provider == "auto":
         if gladia_key or os.getenv("GLADIA_API_KEY"):
@@ -549,7 +673,7 @@ def process_en_zh(
         key = gladia_key or os.getenv("GLADIA_API_KEY")
         if not key:
             raise ValueError("Gladia provider requires --gladia-key or GLADIA_API_KEY")
-        segments, _ = transcribe_with_gladia(
+        segments, gladia_raw_result = transcribe_with_gladia(
             audio_path,
             key,
             source_lang=source_lang,
@@ -590,8 +714,46 @@ def process_en_zh(
 
     kept, dropped = filter_source_segments(segments, source_lang=source_lang)
     merged = merge_adjacent_segments(kept)
+
+    # --- New pipeline: topic grouping → rewrite → translate ---
+
+    # 1. Save Gladia raw VTT alongside (if using Gladia)
+    gladia_vtt_path: str | None = None
+    if provider == "gladia" and gladia_raw_result is not None:
+        gladia_vtt_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia.vtt")
+        write_gladia_vtt(gladia_raw_result, gladia_vtt_path)
+        if verbose:
+            logger.debug("Saved raw Gladia VTT: %s", gladia_vtt_path)
+
+    # 2. Group merged segments into topic paragraphs via LLM
+    topic_paragraphs = group_into_topics(
+        merged,
+        llm=llm or "ollama/qwen3.5:cloud",
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+        verbose=verbose,
+    )
+    if verbose:
+        logger.debug("Grouped into %d topic paragraphs", len(topic_paragraphs))
+
+    # 3. Rewrite English: remove oral fillers, conservative cleanup
+    rewritten_paragraphs = rewrite_english(
+        topic_paragraphs,
+        llm=llm or "ollama/qwen3.5:cloud",
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+        verbose=verbose,
+    )
+
+    # 4. Save rewritten English markdown
+    english_rewritten_md = os.path.join(out_dir, f"{base_name}{suffix}_en_rewritten.md")
+    write_rewritten_markdown(rewritten_paragraphs, english_rewritten_md)
+
+    # 5. Translate rewritten paragraphs
     translations = translate_chunks(
-        [str(segment.get("text") or "") for segment in merged],
+        rewritten_paragraphs,
         target_language=target_language,
         llm=llm or "ollama/qwen3.5:cloud",
         max_tokens=max_tokens,
@@ -606,7 +768,7 @@ def process_en_zh(
     bilingual_md = os.path.join(out_dir, f"{base_name}{suffix}_en_zh.md")
     write_vtt(merged, english_vtt)
     write_english_markdown(merged, english_md)
-    write_bilingual_markdown(merged, translations, bilingual_md)
+    write_bilingual_markdown(rewritten_paragraphs, translations, bilingual_md)
 
     if diagnostics_path:
         with open(diagnostics_path, "w", encoding="utf-8") as f:
@@ -633,4 +795,6 @@ def process_en_zh(
         provider=provider,
         kept_segments=len(merged),
         dropped_segments=len(dropped),
+        gladia_vtt=gladia_vtt_path,
+        english_rewritten_md=english_rewritten_md,
     )

@@ -490,6 +490,10 @@ def handle_en_zh_command(args):
     print("English VTT:", result.english_vtt)
     print("English Markdown:", result.english_md)
     print("Bilingual Markdown:", result.bilingual_md)
+    if result.gladia_vtt:
+        print("Gladia Raw VTT:", result.gladia_vtt)
+    if result.english_rewritten_md:
+        print("English Rewritten Markdown:", result.english_rewritten_md)
     if result.diagnostics_json:
         print("Diagnostics JSON:", result.diagnostics_json)
 
@@ -1752,8 +1756,8 @@ def main():
         en_zh_parser.add_argument(
             "--asr-provider",
             choices=["auto", "gladia", "sensevoice", "whisper"],
-            default="auto",
-            help="ASR backend for bilingual separation (default: auto)",
+            default="gladia",
+            help="ASR backend for bilingual separation (default: gladia)",
         )
         en_zh_parser.add_argument(
             "--source-lang",
