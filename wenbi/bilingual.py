@@ -418,6 +418,8 @@ def transcribe_with_gladia(
     save_raw_json: str | None = None,
     timeout_seconds: int = 1800,
     poll_interval: float = 5.0,
+    upload_timeout_seconds: int | None = None,
+    upload_retries: int | None = None,
     verbose: bool = False,
     code_switching: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -428,6 +430,24 @@ def transcribe_with_gladia(
     config which is appropriate for mono-lingual multi-speaker audio.
     """
     import requests
+
+    def positive_int_from_env(name: str, default: int) -> int:
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            return default
+        try:
+            value = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Ignoring invalid %s=%r; using %d", name, raw_value, default
+            )
+            return default
+        if value <= 0:
+            logger.warning(
+                "Ignoring non-positive %s=%r; using %d", name, raw_value, default
+            )
+            return default
+        return value
 
     def raise_for_gladia_error(response: requests.Response) -> None:
         if response.ok:
@@ -440,13 +460,48 @@ def transcribe_with_gladia(
     headers = {"x-gladia-key": api_key}
     if verbose:
         logger.debug("Uploading audio to Gladia")
-    with open(audio_path, "rb") as audio_file:
-        upload_response = requests.post(
-            "https://api.gladia.io/v2/upload",
-            headers=headers,
-            files={"audio": (os.path.basename(audio_path), audio_file, "audio/wav")},
-            timeout=120,
-        )
+    effective_upload_timeout = upload_timeout_seconds or positive_int_from_env(
+        "WENBI_GLADIA_UPLOAD_TIMEOUT_SECONDS", 900
+    )
+    effective_upload_retries = upload_retries or positive_int_from_env(
+        "WENBI_GLADIA_UPLOAD_RETRIES", 3
+    )
+    upload_response: requests.Response | None = None
+    for attempt in range(1, effective_upload_retries + 1):
+        try:
+            with open(audio_path, "rb") as audio_file:
+                upload_response = requests.post(
+                    "https://api.gladia.io/v2/upload",
+                    headers=headers,
+                    files={
+                        "audio": (
+                            os.path.basename(audio_path),
+                            audio_file,
+                            "audio/wav",
+                        )
+                    },
+                    timeout=effective_upload_timeout,
+                )
+            break
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ) as exc:
+            if attempt >= effective_upload_retries:
+                raise RuntimeError(
+                    "Gladia upload failed after "
+                    f"{effective_upload_retries} attempts: {exc}"
+                ) from exc
+            if verbose:
+                logger.warning(
+                    "Gladia upload attempt %d/%d failed: %s",
+                    attempt,
+                    effective_upload_retries,
+                    exc,
+                )
+            time.sleep(min(2 ** (attempt - 1), 10))
+    if upload_response is None:
+        raise RuntimeError("Gladia upload did not return a response")
     raise_for_gladia_error(upload_response)
     audio_url = upload_response.json()["audio_url"]
 
