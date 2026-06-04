@@ -498,6 +498,59 @@ def handle_en_zh_command(args):
         print("Diagnostics JSON:", result.diagnostics_json)
 
 
+def handle_speaker_command(args):
+    """Handle the speaker subcommand — single-language multi-speaker workflow."""
+    logger = setup_logging(args.verbose)
+
+    if args.verbose:
+        logger.debug("Starting speaker command")
+        logger.debug(f"Input: {args.input}")
+        logger.debug(f"ASR provider: {args.asr_provider}")
+
+    from wenbi.bilingual import process_speaker
+
+    try:
+        result = process_speaker(
+            input_path=args.input,
+            output_dir=args.output_dir,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            asr_provider=args.asr_provider,
+            transcribe_model=args.transcribe_model,
+            source_lang=args.source_lang,
+            target_language=args.lang or "Chinese",
+            llm=args.llm or "ollama/qwen3.5:cloud",
+            chunk_length=args.chunk_length,
+            max_tokens=args.max_tokens,
+            timeout=args.timeout,
+            temperature=args.temperature,
+            deepl_key=args.deepl_key,
+            gladia_key=args.gladia_key,
+            speaker_labels=args.speaker_labels,
+            save_json=args.save_json,
+            verbose=args.verbose,
+        )
+    except Exception as e:
+        if args.verbose:
+            logger.exception("Unexpected error during speaker processing")
+        print(f"Error: {e}")
+        return
+
+    print("Speaker-aware processing completed successfully!")
+    print("ASR provider:", result.provider)
+    print("Speakers detected:", result.num_speakers)
+    print("Total segments:", result.total_segments)
+    print("Transcript VTT:", result.transcript_vtt)
+    print("Transcript Markdown:", result.transcript_md)
+    print("Rewritten Markdown:", result.rewritten_md)
+    if result.bilingual_md:
+        print("Bilingual Markdown:", result.bilingual_md)
+    if result.gladia_vtt:
+        print("Gladia Raw VTT:", result.gladia_vtt)
+    if result.diagnostics_json:
+        print("Diagnostics JSON:", result.diagnostics_json)
+
+
 def add_global_args(subparser):
     """Add common arguments to subparsers"""
     subparser.add_argument("input", help="Path to input file or URL")
@@ -1710,7 +1763,7 @@ def main():
     print("Debug: download_all completed")
 
     # Check if this is a subcommand
-    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "ppt", "p"]
+    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "speaker", "sp", "ppt", "p"]
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
     print(f"Debug: sys.argv = {sys.argv}")
     print(f"Debug: is_subcommand = {is_subcommand}")
@@ -1794,6 +1847,52 @@ def main():
         )
         en_zh_parser.set_defaults(
             func=handle_en_zh_command,
+            transcribe_model="large-v3-turbo",
+        )
+
+        # Speaker-aware single-language subcommand
+        speaker_parser = subparsers.add_parser(
+            "speaker",
+            aliases=["sp"],
+            help="Transcribe single-language multi-speaker audio with diarization, rewrite, and translate",
+        )
+        add_global_args(speaker_parser)
+        speaker_parser.add_argument(
+            "--asr-provider",
+            choices=["auto", "gladia", "sensevoice", "whisper"],
+            default="gladia",
+            help="ASR backend for transcription with diarization (default: gladia)",
+        )
+        speaker_parser.add_argument(
+            "--source-lang",
+            default="en",
+            help="Language of the audio (default: en)",
+        )
+        speaker_parser.add_argument(
+            "--gladia-key",
+            default="",
+            help="Gladia API key (uses GLADIA_API_KEY env var if not provided)",
+        )
+        speaker_parser.add_argument(
+            "--speaker-labels",
+            action="store_true",
+            default=True,
+            help="Request speaker labels when the ASR provider supports them (default: enabled)",
+        )
+        speaker_parser.add_argument(
+            "--no-speaker-labels",
+            dest="speaker_labels",
+            action="store_false",
+            help="Disable speaker labels",
+        )
+        speaker_parser.add_argument(
+            "--save-json",
+            action="store_true",
+            default=False,
+            help="Save segment diagnostics and raw provider JSON when available",
+        )
+        speaker_parser.set_defaults(
+            func=handle_speaker_command,
             transcribe_model="large-v3-turbo",
         )
 
@@ -1908,7 +2007,7 @@ def main():
 
     # Main command (direct file processing)
     parser = argparse.ArgumentParser(
-        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
+        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), en-zh (enzh), speaker (sp), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
     )
     parser.add_argument(
         "input", nargs="?", default="", help="Path to input file or URL"

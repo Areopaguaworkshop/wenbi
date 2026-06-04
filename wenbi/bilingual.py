@@ -419,8 +419,14 @@ def transcribe_with_gladia(
     timeout_seconds: int = 1800,
     poll_interval: float = 5.0,
     verbose: bool = False,
+    code_switching: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Transcribe with Gladia pre-recorded code switching."""
+    """Transcribe with Gladia pre-recorded.
+
+    When code_switching=True, enables bilingual code-switching mode (original
+    behaviour for en-zh).  When code_switching=False, sends a single-language
+    config which is appropriate for mono-lingual multi-speaker audio.
+    """
     import requests
 
     def raise_for_gladia_error(response: requests.Response) -> None:
@@ -444,14 +450,23 @@ def transcribe_with_gladia(
     raise_for_gladia_error(upload_response)
     audio_url = upload_response.json()["audio_url"]
 
-    payload: dict[str, Any] = {
-        "audio_url": audio_url,
-        "language_config": {
-            "languages": [source_lang, interpreter_lang],
-            "code_switching": True,
-        },
-        "sentences": True,
-    }
+    if code_switching:
+        payload: dict[str, Any] = {
+            "audio_url": audio_url,
+            "language_config": {
+                "languages": [source_lang, interpreter_lang],
+                "code_switching": True,
+            },
+            "sentences": True,
+        }
+    else:
+        payload: dict[str, Any] = {
+            "audio_url": audio_url,
+            "language_config": {
+                "languages": [source_lang],
+            },
+            "sentences": True,
+        }
     if speaker_labels:
         payload["diarization"] = True
         payload["diarization_config"] = {"min_speakers": 1, "max_speakers": 6}
@@ -797,4 +812,235 @@ def process_en_zh(
         dropped_segments=len(dropped),
         gladia_vtt=gladia_vtt_path,
         english_rewritten_md=english_rewritten_md,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Speaker-aware single-language workflow (e.g. English interview with 2+
+# speakers, no interpreter).  Transcribes with diarization, groups into
+# topics, rewrites, and optionally translates to a target language.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SpeakerResult:
+    """Output paths produced by the speaker workflow."""
+
+    transcript_vtt: str
+    transcript_md: str
+    rewritten_md: str
+    bilingual_md: str | None
+    diagnostics_json: str | None
+    provider: str
+    num_speakers: int
+    total_segments: int
+    gladia_vtt: str | None = None
+
+
+def process_speaker(
+    input_path: str,
+    output_dir: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    asr_provider: str = "gladia",
+    transcribe_model: str = "large-v3-turbo",
+    source_lang: str = "en",
+    target_language: str = "Chinese",
+    llm: str = "ollama/qwen3.5:cloud",
+    chunk_length: int = 20,
+    max_tokens: int = 64000,
+    timeout: int = 3600,
+    temperature: float = 0.1,
+    deepl_key: str | None = None,
+    gladia_key: str | None = None,
+    speaker_labels: bool = True,
+    save_json: bool = False,
+    verbose: bool = False,
+) -> SpeakerResult:
+    """Run the full speaker-aware single-language workflow.
+
+    1. Transcribe with diarization (Gladia, SenseVoice, or Whisper).
+    2. Merge adjacent same-speaker segments.
+    3. Group into topic paragraphs via LLM.
+    4. Rewrite (remove oral fillers).
+    5. Optionally translate to *target_language*.
+    """
+    if not input_path:
+        raise ValueError("input_path is required")
+    out_dir = output_dir or os.getcwd()
+    os.makedirs(out_dir, exist_ok=True)
+
+    base_name = os.path.splitext(os.path.basename(input_path))[0]
+    if start_time and end_time:
+        suffix = f"_{start_time.replace(':', '')}_{end_time.replace(':', '')}"
+    else:
+        suffix = ""
+    output_wav = f"{base_name}{suffix}.wav" if suffix else ""
+    audio_path = prepare_audio(
+        input_path,
+        out_dir,
+        start_time=start_time or None,
+        end_time=end_time or None,
+        output_wav=output_wav,
+        verbose=verbose,
+    )
+
+    raw_json_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia_raw.json") if save_json else None
+    diagnostics_path = os.path.join(out_dir, f"{base_name}{suffix}_speaker_segments.json") if save_json else None
+    provider = asr_provider
+    segments: list[dict[str, Any]]
+    gladia_raw_result: dict[str, Any] | None = None
+
+    if asr_provider == "auto":
+        if gladia_key or os.getenv("GLADIA_API_KEY"):
+            provider = "gladia"
+        else:
+            provider = "sensevoice"
+
+    if provider == "gladia":
+        key = gladia_key or os.getenv("GLADIA_API_KEY")
+        if not key:
+            raise ValueError("Gladia provider requires --gladia-key or GLADIA_API_KEY")
+        segments, gladia_raw_result = transcribe_with_gladia(
+            audio_path,
+            key,
+            source_lang=source_lang,
+            interpreter_lang=source_lang,  # same language — no code switching
+            speaker_labels=speaker_labels,
+            save_raw_json=raw_json_path,
+            verbose=verbose,
+            code_switching=False,
+        )
+    elif provider == "sensevoice":
+        try:
+            segments = transcribe_with_sensevoice(
+                audio_path, speaker_labels=speaker_labels, verbose=verbose
+            )
+        except Exception as e:
+            if asr_provider == "auto":
+                logger.warning(f"SenseVoice failed ({e}), falling back to Whisper")
+                provider = "whisper"
+                segments = transcribe_with_whisper_chunks(
+                    audio_path, model_size=transcribe_model, verbose=verbose
+                )
+            else:
+                raise
+    elif provider == "whisper":
+        segments = transcribe_with_whisper_chunks(
+            audio_path, model_size=transcribe_model, verbose=verbose
+        )
+    else:
+        raise ValueError(f"Unknown ASR provider: {asr_provider}")
+
+    # Shift timestamps back when --start-time/--end-time were used.
+    timestamp = parse_timestamp(start_time or None, end_time or None)
+    offset = float((timestamp or {}).get("start") or 0)
+    if offset:
+        for segment in segments:
+            segment["start"] = float(segment.get("start") or 0) + offset
+            segment["end"] = float(segment.get("end") or 0) + offset
+
+    # Label all segments with the source language (no filtering needed)
+    for seg in segments:
+        if not seg.get("language"):
+            seg["language"] = source_lang
+
+    merged = merge_adjacent_segments(segments)
+
+    # Count distinct speakers
+    speakers_seen = {
+        seg.get("speaker") for seg in merged if seg.get("speaker")
+    }
+    num_speakers = len(speakers_seen) or 1
+
+    # --- Topic grouping → rewrite → translate ---
+
+    # 1. Save Gladia raw VTT (if using Gladia)
+    gladia_vtt_path: str | None = None
+    if provider == "gladia" and gladia_raw_result is not None:
+        gladia_vtt_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia.vtt")
+        write_gladia_vtt(gladia_raw_result, gladia_vtt_path)
+        if verbose:
+            logger.debug("Saved raw Gladia VTT: %s", gladia_vtt_path)
+
+    # 2. Group merged segments into topic paragraphs via LLM
+    topic_paragraphs = group_into_topics(
+        merged,
+        llm=llm or "ollama/qwen3.5:cloud",
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+        verbose=verbose,
+    )
+    if verbose:
+        logger.debug("Grouped into %d topic paragraphs", len(topic_paragraphs))
+
+    # 3. Rewrite English: remove oral fillers, conservative cleanup
+    rewritten_paragraphs = rewrite_english(
+        topic_paragraphs,
+        llm=llm or "ollama/qwen3.5:cloud",
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+        verbose=verbose,
+    )
+
+    # 4. Save rewritten markdown
+    rewritten_md_path = os.path.join(out_dir, f"{base_name}{suffix}_rewritten.md")
+    write_rewritten_markdown(rewritten_paragraphs, rewritten_md_path)
+
+    # 5. Translate if target_language differs from source_lang
+    bilingual_md_path: str | None = None
+    target_lang_lower = (target_language or "").lower()
+    source_lower = source_lang.lower()
+    # Simple heuristic: skip translation when target matches source
+    _skip_translation = (
+        target_lang_lower in ("", source_lower)
+        or target_lang_lower.startswith(source_lower)
+    )
+    if not _skip_translation:
+        translations = translate_chunks(
+            rewritten_paragraphs,
+            target_language=target_language,
+            llm=llm or "ollama/qwen3.5:cloud",
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            deepl_key=deepl_key,
+            verbose=verbose,
+        )
+        bilingual_md_path = os.path.join(out_dir, f"{base_name}{suffix}_en_zh.md")
+        write_bilingual_markdown(rewritten_paragraphs, translations, bilingual_md_path)
+
+    # 6. Write transcript VTT + markdown (with speaker labels)
+    transcript_vtt = os.path.join(out_dir, f"{base_name}{suffix}_en.vtt")
+    transcript_md = os.path.join(out_dir, f"{base_name}{suffix}_en.md")
+    write_vtt(merged, transcript_vtt)
+    write_english_markdown(merged, transcript_md)
+
+    if diagnostics_path:
+        with open(diagnostics_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "provider": provider,
+                    "source_lang": source_lang,
+                    "audio_path": audio_path,
+                    "merged_segments": merged,
+                    "raw_segments": segments,
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+    return SpeakerResult(
+        transcript_vtt=transcript_vtt,
+        transcript_md=transcript_md,
+        rewritten_md=rewritten_md_path,
+        bilingual_md=bilingual_md_path,
+        diagnostics_json=diagnostics_path,
+        provider=provider,
+        num_speakers=num_speakers,
+        total_segments=len(merged),
+        gladia_vtt=gladia_vtt_path,
     )
