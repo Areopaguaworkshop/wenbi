@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -409,6 +410,70 @@ def normalize_gladia_utterances(response: dict[str, Any]) -> list[dict[str, Any]
     return segments
 
 
+def gladia_upload_mime_type(audio_path: str) -> str:
+    """Return a reasonable upload MIME type for Gladia-supported audio files."""
+    extension = os.path.splitext(audio_path)[1].lower()
+    if extension == ".m4a":
+        return "audio/m4a"
+    if extension == ".mp3":
+        return "audio/mpeg"
+    if extension == ".ogg":
+        return "application/ogg"
+    if extension == ".opus":
+        return "audio/opus"
+    if extension == ".flac":
+        return "audio/flac"
+    return "audio/wav"
+
+
+def prepare_gladia_upload_audio(audio_path: str, verbose: bool = False) -> str:
+    """Compress large WAV uploads to m4a to avoid fragile huge multipart uploads."""
+    if not audio_path.lower().endswith(".wav"):
+        return audio_path
+
+    threshold_mb = int(os.getenv("WENBI_GLADIA_COMPRESS_UPLOAD_MB", "50"))
+    threshold_bytes = threshold_mb * 1024 * 1024
+    if os.path.getsize(audio_path) < threshold_bytes:
+        return audio_path
+
+    output_path = f"{os.path.splitext(audio_path)[0]}_gladia_upload.m4a"
+    if (
+        os.path.exists(output_path)
+        and os.path.getmtime(output_path) >= os.path.getmtime(audio_path)
+        and os.path.getsize(output_path) > 0
+    ):
+        if verbose:
+            logger.debug("Using existing compressed Gladia upload: %s", output_path)
+        return output_path
+
+    if verbose:
+        logger.debug("Compressing Gladia upload to m4a: %s", output_path)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        audio_path,
+        "-vn",
+        "-acodec",
+        "aac",
+        "-b:a",
+        "64k",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        output_path,
+    ]
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode != 0:
+        stderr_output = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(
+            "ffmpeg failed while compressing Gladia upload: "
+            f"{stderr_output[-500:]}"
+        )
+    return output_path
+
+
 def transcribe_with_gladia(
     audio_path: str,
     api_key: str,
@@ -460,6 +525,8 @@ def transcribe_with_gladia(
     headers = {"x-gladia-key": api_key}
     if verbose:
         logger.debug("Uploading audio to Gladia")
+    upload_audio_path = prepare_gladia_upload_audio(audio_path, verbose=verbose)
+    upload_mime_type = gladia_upload_mime_type(upload_audio_path)
     effective_upload_timeout = upload_timeout_seconds or positive_int_from_env(
         "WENBI_GLADIA_UPLOAD_TIMEOUT_SECONDS", 900
     )
@@ -469,15 +536,15 @@ def transcribe_with_gladia(
     upload_response: requests.Response | None = None
     for attempt in range(1, effective_upload_retries + 1):
         try:
-            with open(audio_path, "rb") as audio_file:
+            with open(upload_audio_path, "rb") as audio_file:
                 upload_response = requests.post(
                     "https://api.gladia.io/v2/upload",
                     headers=headers,
                     files={
                         "audio": (
-                            os.path.basename(audio_path),
+                            os.path.basename(upload_audio_path),
                             audio_file,
-                            "audio/wav",
+                            upload_mime_type,
                         )
                     },
                     timeout=effective_upload_timeout,

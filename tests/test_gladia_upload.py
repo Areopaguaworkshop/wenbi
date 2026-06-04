@@ -74,3 +74,49 @@ def test_transcribe_with_gladia_retries_upload_timeout(tmp_path, monkeypatch):
     assert post_calls[0][1] == 321
     assert segments[0]["text"] == "hello"
     assert raw_result["status"] == "done"
+
+
+def test_transcribe_with_gladia_compresses_large_wav(tmp_path, monkeypatch):
+    audio_path = tmp_path / "large.wav"
+    audio_path.write_bytes(b"audio")
+    compressed_path = tmp_path / "large_gladia_upload.m4a"
+
+    def fake_getsize(path):
+        if str(path).endswith("large.wav"):
+            return 100 * 1024 * 1024
+        return 123
+
+    def fake_run(cmd, stdout, stderr):
+        compressed_path.write_bytes(b"compressed")
+
+        class Result:
+            returncode = 0
+            stderr = b""
+
+        return Result()
+
+    post_files = []
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/upload"):
+            audio_file = kwargs["files"]["audio"]
+            post_files.append((audio_file[0], audio_file[2]))
+            return FakeResponse({"audio_url": "https://media.example/audio.m4a"})
+        return FakeResponse({"id": "job-1", "result_url": "https://job.example/result"})
+
+    def fake_get(url, **kwargs):
+        return FakeResponse({"status": "done", "result": {"transcription": {}}})
+
+    monkeypatch.setattr(bilingual.os.path, "getsize", fake_getsize)
+    monkeypatch.setattr(bilingual.subprocess, "run", fake_run)
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    bilingual.transcribe_with_gladia(
+        str(audio_path),
+        "api-key",
+        poll_interval=0,
+        code_switching=False,
+    )
+
+    assert post_files == [("large_gladia_upload.m4a", "audio/m4a")]
