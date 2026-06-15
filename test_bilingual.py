@@ -2,14 +2,15 @@ import json
 
 from wenbi.bilingual import (
     filter_source_segments,
+    format_speaker_turns_for_rewrite,
     merge_adjacent_segments,
     normalize_gladia_utterances,
+    process_speaker,
     seconds_to_display_time,
     seconds_to_vtt_time,
     write_bilingual_markdown,
     write_english_markdown,
     write_rewritten_markdown,
-    write_gladia_vtt,
     write_vtt,
 )
 
@@ -45,6 +46,17 @@ def test_merge_adjacent_segments_same_speaker_language():
     assert merged[0]["text"] == "First. Second."
     assert merged[0]["end"] == 4
     assert merged[1]["text"] == "Third."
+
+
+def test_format_speaker_turns_for_rewrite_preserves_labels():
+    segments = [
+        {"speaker": "Speaker 0", "text": "主持人问题。"},
+        {"speaker": "Speaker 1", "text": "受访者回答。"},
+    ]
+
+    chunks = format_speaker_turns_for_rewrite(segments)
+
+    assert chunks == ["【Speaker 0】主持人问题。\n【Speaker 1】受访者回答。"]
 
 
 def test_normalize_gladia_utterances():
@@ -140,3 +152,55 @@ def test_bilingual_markdown_no_timestamps(tmp_path):
     assert "### **" not in content
     assert "Speaker" not in content
     assert "---" in content
+
+
+def test_process_speaker_en_interview_uses_speaker_aware_rewrite(tmp_path, monkeypatch):
+    audio_path = tmp_path / "interview.wav"
+    audio_path.write_bytes(b"audio")
+    captured = {}
+
+    def fake_prepare_audio(*args, **kwargs):
+        return str(audio_path)
+
+    def fake_transcribe(*args, **kwargs):
+        return [
+            {
+                "start": 0,
+                "end": 1,
+                "text": "Um welcome to the interview.",
+                "language": "en",
+                "speaker": "Speaker 0",
+            },
+            {
+                "start": 2,
+                "end": 3,
+                "text": "Yeah thanks for having me.",
+                "language": "en",
+                "speaker": "Speaker 1",
+            },
+        ]
+
+    def fake_rewrite(chunks, **kwargs):
+        captured["chunks"] = chunks
+        captured["expected_speakers"] = kwargs["expected_speakers"]
+        return ["[Speaker 0] Welcome to the interview.\n[Speaker 1] Thank you for having me."]
+
+    monkeypatch.setattr("wenbi.bilingual.prepare_audio", fake_prepare_audio)
+    monkeypatch.setattr("wenbi.bilingual.transcribe_with_whisper_chunks", fake_transcribe)
+    monkeypatch.setattr("wenbi.bilingual.rewrite_english_interview", fake_rewrite)
+
+    result = process_speaker(
+        str(audio_path),
+        output_dir=str(tmp_path),
+        asr_provider="whisper",
+        source_lang="en",
+        target_language="English",
+        speaker_count=2,
+        rewrite_mode="en-interview",
+    )
+
+    assert captured["chunks"] == [
+        "【Speaker 0】Um welcome to the interview.\n【Speaker 1】Yeah thanks for having me."
+    ]
+    assert captured["expected_speakers"] == 2
+    assert result.rewritten_md.endswith("_rewritten.md")

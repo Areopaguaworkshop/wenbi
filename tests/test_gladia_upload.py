@@ -120,3 +120,34 @@ def test_transcribe_with_gladia_compresses_large_wav(tmp_path, monkeypatch):
     )
 
     assert post_files == [("large_gladia_upload.m4a", "audio/m4a")]
+
+
+def test_transcribe_with_gladia_honors_exact_speaker_count(tmp_path, monkeypatch):
+    audio_path = tmp_path / "sample.wav"
+    audio_path.write_bytes(b"audio")
+    transcription_payloads = []
+
+    def fake_post(url, **kwargs):
+        if url.endswith("/upload"):
+            return FakeResponse({"audio_url": "https://media.example/audio.wav"})
+        transcription_payloads.append(kwargs["json"])
+        return FakeResponse({"id": "job-1", "result_url": "https://job.example/result"})
+
+    def fake_get(url, **kwargs):
+        return FakeResponse({"status": "done", "result": {"transcription": {}}})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+
+    bilingual.transcribe_with_gladia(
+        str(audio_path),
+        "api-key",
+        poll_interval=0,
+        code_switching=False,
+        speaker_count=2,
+    )
+
+    assert transcription_payloads[0]["diarization_config"] == {
+        "min_speakers": 2,
+        "max_speakers": 2,
+    }

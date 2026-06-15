@@ -6,6 +6,8 @@ It supports:
 - Video/audio/URL transcription to VTT/Markdown
 - Text rewriting (`rewrite`, `academic` style)
 - Translation (`translate`) with **DeepL first**, then **LLM fallback**
+- English interview rewriting (`en-en`) with speaker-separated output
+- Chinese interview rewriting (`zh-zh`) with speaker-separated output
 - PPT-style slide + speech combination (`ppt`)
 - Batch directory processing (`wenbi-batch`)
 
@@ -40,6 +42,18 @@ Translate (DeepL first):
 
 ```bash
 wenbi translate input.md --lang Chinese --deepl-key "$DEEPL_API_KEY"
+```
+
+English interview rewrite:
+
+```bash
+wenbi en-en interview.mp4 --gladia-key "$GLADIA_API_KEY"
+```
+
+Chinese interview rewrite:
+
+```bash
+wenbi zh-zh interview.mp4 --gladia-key "$GLADIA_API_KEY"
 ```
 
 PPT workflow:
@@ -84,6 +98,38 @@ Key options:
 
 If both DeepL and LLM are unavailable, translation cannot complete successfully.
 
+### `en-en` (`enen`)
+Transcribe an English interview, separate speaker turns, and rewrite it as polished written English using `ollama/qwen3.5:cloud` by default.
+
+```bash
+wenbi en-en <input> [options]
+```
+
+Key options:
+- `--speaker-count` (default: `2`)
+- `--asr-provider auto|gladia|sensevoice|whisper`
+- `--gladia-key` (or `GLADIA_API_KEY` env var)
+- `--llm` (default: `ollama/qwen3.5:cloud`)
+- `--start-time`, `--end-time` (media/URL)
+
+The rewrite preserves speaker labels and adds a `## Questions for Clarification` section when speaker roles, names, terms, or ambiguous ASR phrases need human confirmation.
+
+### `zh-zh` (`zhzh`)
+Transcribe a Chinese interview, separate speaker turns, and rewrite it as polished written Chinese using `ollama/qwen3.5:cloud` by default.
+
+```bash
+wenbi zh-zh <input> [options]
+```
+
+Key options:
+- `--speaker-count` (default: `2`)
+- `--asr-provider auto|gladia|sensevoice|whisper`
+- `--gladia-key` (or `GLADIA_API_KEY` env var)
+- `--llm` (default: `ollama/qwen3.5:cloud`)
+- `--start-time`, `--end-time` (media/URL)
+
+The rewrite preserves speaker labels and adds a `## 需要确认的问题` section when speaker roles, names, terms, or ambiguous ASR phrases need human confirmation.
+
 ### `ppt` (`p`)
 Extract slides from video, align with speech, and export combined markdown.
 
@@ -126,6 +172,8 @@ Typical outputs:
 - `*_rewritten.md`
 - `*_translated.md`
 - `*_academic.md`
+- `*_en.md`, `*_en.vtt` (English interview transcripts)
+- `*_zh.md`, `*_zh.vtt` (Chinese interview transcripts)
 - `*_combine.md` / `*_combine_clean.md` (PPT workflows)
 - `*.vtt`, `*.csv` (depending on flow)
 

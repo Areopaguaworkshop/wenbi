@@ -527,6 +527,7 @@ def handle_speaker_command(args):
             deepl_key=args.deepl_key,
             gladia_key=args.gladia_key,
             speaker_labels=args.speaker_labels,
+            speaker_count=getattr(args, "speaker_count", None),
             save_json=args.save_json,
             verbose=args.verbose,
         )
@@ -545,6 +546,114 @@ def handle_speaker_command(args):
     print("Rewritten Markdown:", result.rewritten_md)
     if result.bilingual_md:
         print("Bilingual Markdown:", result.bilingual_md)
+    if result.gladia_vtt:
+        print("Gladia Raw VTT:", result.gladia_vtt)
+    if result.diagnostics_json:
+        print("Diagnostics JSON:", result.diagnostics_json)
+
+
+def handle_zh_zh_command(args):
+    """Handle Chinese interview transcription and speaker-preserving rewrite."""
+    logger = setup_logging(args.verbose)
+
+    if args.verbose:
+        logger.debug("Starting zh-zh command")
+        logger.debug(f"Input: {args.input}")
+        logger.debug(f"ASR provider: {args.asr_provider}")
+
+    from wenbi.bilingual import process_speaker
+
+    try:
+        result = process_speaker(
+            input_path=args.input,
+            output_dir=args.output_dir,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            asr_provider=args.asr_provider,
+            transcribe_model=args.transcribe_model,
+            source_lang="zh",
+            target_language=args.lang or "Chinese",
+            llm=args.llm or "ollama/qwen3.5:cloud",
+            chunk_length=args.chunk_length,
+            max_tokens=args.max_tokens,
+            timeout=args.timeout,
+            temperature=args.temperature,
+            deepl_key=args.deepl_key,
+            gladia_key=args.gladia_key,
+            speaker_labels=args.speaker_labels,
+            speaker_count=args.speaker_count,
+            rewrite_mode="zh-interview",
+            save_json=args.save_json,
+            verbose=args.verbose,
+        )
+    except Exception as e:
+        if args.verbose:
+            logger.exception("Unexpected error during zh-zh processing")
+        print(f"Error: {e}")
+        return
+
+    print("Chinese interview processing completed successfully!")
+    print("ASR provider:", result.provider)
+    print("Speakers detected:", result.num_speakers)
+    print("Expected speakers:", args.speaker_count)
+    print("Total segments:", result.total_segments)
+    print("Transcript VTT:", result.transcript_vtt)
+    print("Transcript Markdown:", result.transcript_md)
+    print("Rewritten Markdown:", result.rewritten_md)
+    if result.gladia_vtt:
+        print("Gladia Raw VTT:", result.gladia_vtt)
+    if result.diagnostics_json:
+        print("Diagnostics JSON:", result.diagnostics_json)
+
+
+def handle_en_en_command(args):
+    """Handle English interview transcription and speaker-preserving rewrite."""
+    logger = setup_logging(args.verbose)
+
+    if args.verbose:
+        logger.debug("Starting en-en command")
+        logger.debug(f"Input: {args.input}")
+        logger.debug(f"ASR provider: {args.asr_provider}")
+
+    from wenbi.bilingual import process_speaker
+
+    try:
+        result = process_speaker(
+            input_path=args.input,
+            output_dir=args.output_dir,
+            start_time=args.start_time,
+            end_time=args.end_time,
+            asr_provider=args.asr_provider,
+            transcribe_model=args.transcribe_model,
+            source_lang="en",
+            target_language=args.lang or "English",
+            llm=args.llm or "ollama/qwen3.5:cloud",
+            chunk_length=args.chunk_length,
+            max_tokens=args.max_tokens,
+            timeout=args.timeout,
+            temperature=args.temperature,
+            deepl_key=args.deepl_key,
+            gladia_key=args.gladia_key,
+            speaker_labels=args.speaker_labels,
+            speaker_count=args.speaker_count,
+            rewrite_mode="en-interview",
+            save_json=args.save_json,
+            verbose=args.verbose,
+        )
+    except Exception as e:
+        if args.verbose:
+            logger.exception("Unexpected error during en-en processing")
+        print(f"Error: {e}")
+        return
+
+    print("English interview processing completed successfully!")
+    print("ASR provider:", result.provider)
+    print("Speakers detected:", result.num_speakers)
+    print("Expected speakers:", args.speaker_count)
+    print("Total segments:", result.total_segments)
+    print("Transcript VTT:", result.transcript_vtt)
+    print("Transcript Markdown:", result.transcript_md)
+    print("Rewritten Markdown:", result.rewritten_md)
     if result.gladia_vtt:
         print("Gladia Raw VTT:", result.gladia_vtt)
     if result.diagnostics_json:
@@ -1763,7 +1872,7 @@ def main():
     print("Debug: download_all completed")
 
     # Check if this is a subcommand
-    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "speaker", "sp", "ppt", "p"]
+    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "en-en", "enen", "zh-zh", "zhzh", "speaker", "sp", "ppt", "p"]
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
     print(f"Debug: sys.argv = {sys.argv}")
     print(f"Debug: is_subcommand = {is_subcommand}")
@@ -1850,6 +1959,100 @@ def main():
             transcribe_model="large-v3-turbo",
         )
 
+        # English interview subcommand
+        en_en_parser = subparsers.add_parser(
+            "en-en",
+            aliases=["enen"],
+            help="Transcribe and rewrite English interviews with speaker-separated output",
+        )
+        add_global_args(en_en_parser)
+        en_en_parser.add_argument(
+            "--asr-provider",
+            choices=["auto", "gladia", "sensevoice", "whisper"],
+            default="gladia",
+            help="ASR backend for English interview transcription (default: gladia)",
+        )
+        en_en_parser.add_argument(
+            "--gladia-key",
+            default="",
+            help="Gladia API key (uses GLADIA_API_KEY env var if not provided)",
+        )
+        en_en_parser.add_argument(
+            "--speaker-labels",
+            action="store_true",
+            default=True,
+            help="Request speaker labels when the ASR provider supports them (default: enabled)",
+        )
+        en_en_parser.add_argument(
+            "--no-speaker-labels",
+            dest="speaker_labels",
+            action="store_false",
+            help="Disable speaker labels",
+        )
+        en_en_parser.add_argument(
+            "--speaker-count",
+            type=int,
+            default=2,
+            help="Expected number of interview speakers for diarization and rewrite (default: 2)",
+        )
+        en_en_parser.add_argument(
+            "--save-json",
+            action="store_true",
+            default=False,
+            help="Save segment diagnostics and raw provider JSON when available",
+        )
+        en_en_parser.set_defaults(
+            func=handle_en_en_command,
+            transcribe_model="large-v3-turbo",
+        )
+
+        # Chinese interview subcommand
+        zh_zh_parser = subparsers.add_parser(
+            "zh-zh",
+            aliases=["zhzh"],
+            help="Transcribe and rewrite Chinese interviews with speaker-separated output",
+        )
+        add_global_args(zh_zh_parser)
+        zh_zh_parser.add_argument(
+            "--asr-provider",
+            choices=["auto", "gladia", "sensevoice", "whisper"],
+            default="gladia",
+            help="ASR backend for Chinese interview transcription (default: gladia)",
+        )
+        zh_zh_parser.add_argument(
+            "--gladia-key",
+            default="",
+            help="Gladia API key (uses GLADIA_API_KEY env var if not provided)",
+        )
+        zh_zh_parser.add_argument(
+            "--speaker-labels",
+            action="store_true",
+            default=True,
+            help="Request speaker labels when the ASR provider supports them (default: enabled)",
+        )
+        zh_zh_parser.add_argument(
+            "--no-speaker-labels",
+            dest="speaker_labels",
+            action="store_false",
+            help="Disable speaker labels",
+        )
+        zh_zh_parser.add_argument(
+            "--speaker-count",
+            type=int,
+            default=2,
+            help="Expected number of interview speakers for diarization and rewrite (default: 2)",
+        )
+        zh_zh_parser.add_argument(
+            "--save-json",
+            action="store_true",
+            default=False,
+            help="Save segment diagnostics and raw provider JSON when available",
+        )
+        zh_zh_parser.set_defaults(
+            func=handle_zh_zh_command,
+            transcribe_model="large-v3-turbo",
+        )
+
         # Speaker-aware single-language subcommand
         speaker_parser = subparsers.add_parser(
             "speaker",
@@ -1884,6 +2087,12 @@ def main():
             dest="speaker_labels",
             action="store_false",
             help="Disable speaker labels",
+        )
+        speaker_parser.add_argument(
+            "--speaker-count",
+            type=int,
+            default=None,
+            help="Expected number of speakers for diarization (default: provider decides)",
         )
         speaker_parser.add_argument(
             "--save-json",
@@ -2007,7 +2216,7 @@ def main():
 
     # Main command (direct file processing)
     parser = argparse.ArgumentParser(
-        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), en-zh (enzh), speaker (sp), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
+        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), en-zh (enzh), en-en (enen), zh-zh (zhzh), speaker (sp), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
     )
     parser.add_argument(
         "input", nargs="?", default="", help="Path to input file or URL"

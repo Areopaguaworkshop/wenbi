@@ -379,6 +379,142 @@ def rewrite_english(
     return rewritten
 
 
+def format_speaker_turns_for_rewrite(
+    segments: list[dict[str, Any]],
+    max_chars: int = 6000,
+) -> list[str]:
+    """Create speaker-labeled chunks suitable for interview rewriting."""
+    chunks: list[str] = []
+    current_lines: list[str] = []
+    current_len = 0
+
+    for segment in segments:
+        text = str(segment.get("text") or "").strip()
+        if not text:
+            continue
+        speaker = str(segment.get("speaker") or "Speaker").strip()
+        line = f"【{speaker}】{text}"
+        if current_lines and current_len + len(line) > max_chars:
+            chunks.append("\n".join(current_lines))
+            current_lines = []
+            current_len = 0
+        current_lines.append(line)
+        current_len += len(line)
+
+    if current_lines:
+        chunks.append("\n".join(current_lines))
+
+    return chunks
+
+
+def rewrite_chinese_interview(
+    speaker_chunks: list[str],
+    llm: str = "ollama/qwen3.5:cloud",
+    expected_speakers: int = 2,
+    max_tokens: int = 64000,
+    timeout: int = 3600,
+    temperature: float = 0.1,
+    verbose: bool = False,
+) -> list[str]:
+    """Polish a Chinese interview transcript while preserving speaker turns."""
+    from wenbi.model import _import_dspy, configure_lm
+
+    configure_lm(
+        llm or "ollama/qwen3.5:cloud",
+        verbose=verbose,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+    )
+    dspy = _import_dspy()
+
+    class ChineseInterviewRewriteSignature(dspy.Signature):
+        """
+        Rewrite a Chinese interview transcript into polished written Chinese.
+
+        Follow these rules strictly:
+        1. Preserve speaker separation and turn order. Keep every paragraph prefixed with a speaker label such as 【主持人】, 【受访者】, or the original 【Speaker 0】/【Speaker 1】 label when roles are unclear.
+        2. Assume the interview has {expected_speakers} speakers unless the transcript clearly shows otherwise.
+        3. Remove Chinese oral fillers and repetitions such as 嗯、啊、这个、那个、就是说、然后、对吧、是吧、什么的、之类的, while preserving meaning.
+        4. Convert fragmented spoken Chinese into fluent written interview prose. Correct punctuation, grammar, names, terms, and obvious ASR mistakes only when context makes the correction clear.
+        5. Do not add arguments, facts, citations, or examples that are not present in the transcript.
+        6. If a speaker role, proper noun, technical term, timeline, or ambiguous ASR phrase needs human confirmation, append a short section titled ## 需要确认的问题 with concrete questions. Omit that section if nothing needs confirmation.
+        """
+
+        speaker_text = dspy.InputField(desc="Chinese speaker-labeled interview transcript")
+        expected_speakers = dspy.InputField(desc="Expected number of speakers")
+        written_text = dspy.OutputField(desc="Polished Chinese interview transcript with speaker labels")
+
+    module = dspy.Predict(ChineseInterviewRewriteSignature)
+
+    rewritten: list[str] = []
+    for i, chunk in enumerate(speaker_chunks, 1):
+        if verbose:
+            logger.debug("Rewriting Chinese interview chunk %d/%d", i, len(speaker_chunks))
+        try:
+            result = module(speaker_text=chunk, expected_speakers=str(expected_speakers))
+            rewritten.append(result.written_text.strip())
+        except Exception as e:
+            logger.warning("Chinese interview rewrite failed for chunk %d: %s", i, e)
+            rewritten.append(chunk)
+
+    return rewritten
+
+
+def rewrite_english_interview(
+    speaker_chunks: list[str],
+    llm: str = "ollama/qwen3.5:cloud",
+    expected_speakers: int = 2,
+    max_tokens: int = 64000,
+    timeout: int = 3600,
+    temperature: float = 0.1,
+    verbose: bool = False,
+) -> list[str]:
+    """Polish an English interview transcript while preserving speaker turns."""
+    from wenbi.model import _import_dspy, configure_lm
+
+    configure_lm(
+        llm or "ollama/qwen3.5:cloud",
+        verbose=verbose,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        temperature=temperature,
+    )
+    dspy = _import_dspy()
+
+    class EnglishInterviewRewriteSignature(dspy.Signature):
+        """
+        Rewrite an English interview transcript into polished written English.
+
+        Follow these rules strictly:
+        1. Preserve speaker separation and turn order. Keep every paragraph prefixed with a speaker label such as [Host], [Guest], or the original [Speaker 0]/[Speaker 1] label when roles are unclear.
+        2. Assume the interview has {expected_speakers} speakers unless the transcript clearly shows otherwise.
+        3. Remove oral fillers and repetitions such as um, uh, you know, like, I mean, sort of, kind of, right, okay, false starts, and repeated fragments, while preserving meaning.
+        4. Convert fragmented spoken English into fluent written interview prose. Correct punctuation, grammar, names, terms, and obvious ASR mistakes only when context makes the correction clear.
+        5. Do not add arguments, facts, citations, or examples that are not present in the transcript.
+        6. If a speaker role, proper noun, technical term, timeline, or ambiguous ASR phrase needs human confirmation, append a short section titled ## Questions for Clarification with concrete questions. Omit that section if nothing needs confirmation.
+        """
+
+        speaker_text = dspy.InputField(desc="English speaker-labeled interview transcript")
+        expected_speakers = dspy.InputField(desc="Expected number of speakers")
+        written_text = dspy.OutputField(desc="Polished English interview transcript with speaker labels")
+
+    module = dspy.Predict(EnglishInterviewRewriteSignature)
+
+    rewritten: list[str] = []
+    for i, chunk in enumerate(speaker_chunks, 1):
+        if verbose:
+            logger.debug("Rewriting English interview chunk %d/%d", i, len(speaker_chunks))
+        try:
+            result = module(speaker_text=chunk, expected_speakers=str(expected_speakers))
+            rewritten.append(result.written_text.strip())
+        except Exception as e:
+            logger.warning("English interview rewrite failed for chunk %d: %s", i, e)
+            rewritten.append(chunk)
+
+    return rewritten
+
+
 def write_gladia_vtt(raw_result: dict[str, Any], output_path: str) -> None:
     """Write the raw Gladia API response as a WebVTT file (cue-level, no merging)."""
     segments = normalize_gladia_utterances(raw_result)
@@ -487,6 +623,7 @@ def transcribe_with_gladia(
     upload_retries: int | None = None,
     verbose: bool = False,
     code_switching: bool = True,
+    speaker_count: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Transcribe with Gladia pre-recorded.
 
@@ -591,7 +728,13 @@ def transcribe_with_gladia(
         }
     if speaker_labels:
         payload["diarization"] = True
-        payload["diarization_config"] = {"min_speakers": 1, "max_speakers": 6}
+        if speaker_count:
+            payload["diarization_config"] = {
+                "min_speakers": speaker_count,
+                "max_speakers": speaker_count,
+            }
+        else:
+            payload["diarization_config"] = {"min_speakers": 1, "max_speakers": 6}
 
     if verbose:
         logger.debug("Creating Gladia transcription job")
@@ -976,6 +1119,8 @@ def process_speaker(
     deepl_key: str | None = None,
     gladia_key: str | None = None,
     speaker_labels: bool = True,
+    speaker_count: int | None = None,
+    rewrite_mode: str = "english",
     save_json: bool = False,
     verbose: bool = False,
 ) -> SpeakerResult:
@@ -1029,6 +1174,7 @@ def process_speaker(
             source_lang=source_lang,
             interpreter_lang=source_lang,  # same language — no code switching
             speaker_labels=speaker_labels,
+            speaker_count=speaker_count,
             save_raw_json=raw_json_path,
             verbose=verbose,
             code_switching=False,
@@ -1085,27 +1231,54 @@ def process_speaker(
         if verbose:
             logger.debug("Saved raw Gladia VTT: %s", gladia_vtt_path)
 
-    # 2. Group merged segments into topic paragraphs via LLM
-    topic_paragraphs = group_into_topics(
-        merged,
-        llm=llm or "ollama/qwen3.5:cloud",
-        max_tokens=max_tokens,
-        timeout=timeout,
-        temperature=temperature,
-        verbose=verbose,
-    )
-    if verbose:
-        logger.debug("Grouped into %d topic paragraphs", len(topic_paragraphs))
+    if rewrite_mode == "zh-interview":
+        speaker_chunks = format_speaker_turns_for_rewrite(merged)
+        if verbose:
+            logger.debug("Prepared %d speaker-labeled Chinese chunks", len(speaker_chunks))
+        rewritten_paragraphs = rewrite_chinese_interview(
+            speaker_chunks,
+            llm=llm or "ollama/qwen3.5:cloud",
+            expected_speakers=speaker_count or num_speakers or 2,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            verbose=verbose,
+        )
+    elif rewrite_mode == "en-interview":
+        speaker_chunks = format_speaker_turns_for_rewrite(merged)
+        if verbose:
+            logger.debug("Prepared %d speaker-labeled English chunks", len(speaker_chunks))
+        rewritten_paragraphs = rewrite_english_interview(
+            speaker_chunks,
+            llm=llm or "ollama/qwen3.5:cloud",
+            expected_speakers=speaker_count or num_speakers or 2,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            verbose=verbose,
+        )
+    else:
+        # 2. Group merged segments into topic paragraphs via LLM
+        topic_paragraphs = group_into_topics(
+            merged,
+            llm=llm or "ollama/qwen3.5:cloud",
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            verbose=verbose,
+        )
+        if verbose:
+            logger.debug("Grouped into %d topic paragraphs", len(topic_paragraphs))
 
-    # 3. Rewrite English: remove oral fillers, conservative cleanup
-    rewritten_paragraphs = rewrite_english(
-        topic_paragraphs,
-        llm=llm or "ollama/qwen3.5:cloud",
-        max_tokens=max_tokens,
-        timeout=timeout,
-        temperature=temperature,
-        verbose=verbose,
-    )
+        # 3. Rewrite English: remove oral fillers, conservative cleanup
+        rewritten_paragraphs = rewrite_english(
+            topic_paragraphs,
+            llm=llm or "ollama/qwen3.5:cloud",
+            max_tokens=max_tokens,
+            timeout=timeout,
+            temperature=temperature,
+            verbose=verbose,
+        )
 
     # 4. Save rewritten markdown
     rewritten_md_path = os.path.join(out_dir, f"{base_name}{suffix}_rewritten.md")
@@ -1131,12 +1304,12 @@ def process_speaker(
             deepl_key=deepl_key,
             verbose=verbose,
         )
-        bilingual_md_path = os.path.join(out_dir, f"{base_name}{suffix}_en_zh.md")
+        bilingual_md_path = os.path.join(out_dir, f"{base_name}{suffix}_{source_lower}_zh.md")
         write_bilingual_markdown(rewritten_paragraphs, translations, bilingual_md_path)
 
     # 6. Write transcript VTT + markdown (with speaker labels)
-    transcript_vtt = os.path.join(out_dir, f"{base_name}{suffix}_en.vtt")
-    transcript_md = os.path.join(out_dir, f"{base_name}{suffix}_en.md")
+    transcript_vtt = os.path.join(out_dir, f"{base_name}{suffix}_{source_lower}.vtt")
+    transcript_md = os.path.join(out_dir, f"{base_name}{suffix}_{source_lower}.md")
     write_vtt(merged, transcript_vtt)
     write_english_markdown(merged, transcript_md)
 
@@ -1146,6 +1319,8 @@ def process_speaker(
                 {
                     "provider": provider,
                     "source_lang": source_lang,
+                    "speaker_count": speaker_count,
+                    "rewrite_mode": rewrite_mode,
                     "audio_path": audio_path,
                     "merged_segments": merged,
                     "raw_segments": segments,
