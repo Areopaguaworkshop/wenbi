@@ -11,6 +11,17 @@ from pydub import AudioSegment
 import logging
 
 
+def is_text_file(file_path):
+    """Check if input is VTT, markdown, or docx file"""
+    if not file_path:
+        return False
+    text_extensions = (
+        ".vtt", ".srt", ".ass", ".ssa", ".sub", ".smi",
+        ".txt", ".md", ".markdown", ".docx",
+    )
+    return file_path.lower().endswith(text_extensions)
+
+
 def parse_subtitle(file_path, vtt_file=None, verbose=False):
     """
     Parses various subtitle formats (.ass, .sub, .srt, .txt, .vtt) into a DataFrame.

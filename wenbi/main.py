@@ -6,6 +6,7 @@ from wenbi.model import academic, process_docx, rewrite, translate
 from wenbi.utils import (
     download_audio,
     extract_audio_segment,  # replace video_to_audio with extract_audio_segment
+    is_text_file,
     language_detect,
     parse_subtitle,
     transcribe,
@@ -38,26 +39,6 @@ def is_video_audio_or_url(file_path, url):
         return file_path.lower().endswith(video_extensions + audio_extensions)
 
     return False
-
-
-def is_text_file(file_path):
-    """Check if input is VTT, markdown, or docx file"""
-    if not file_path:
-        return False
-
-    text_extensions = (
-        ".vtt",
-        ".srt",
-        ".ass",
-        ".ssa",
-        ".sub",
-        ".smi",
-        ".txt",
-        ".md",
-        ".markdown",
-        ".docx",
-    )
-    return file_path.lower().endswith(text_extensions)
 
 
 def process_input(

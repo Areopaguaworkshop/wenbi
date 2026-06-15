@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from wenbi.utils import download_audio, extract_audio_segment, parse_timestamp
+from wenbi.utils import download_audio, extract_audio_segment, is_text_file, parse_timestamp
 
 
 logger = logging.getLogger(__name__)
@@ -1102,6 +1102,46 @@ class SpeakerResult:
     gladia_vtt: str | None = None
 
 
+def _parse_vtt_to_segments(file_path, source_lang="zh"):
+    """Parse a VTT file with optional <v Speaker> tags into segment dicts.
+
+    Returns list of dicts with keys: start, end, text, speaker, language
+    """
+    import re
+    segments = []
+    with open(file_path, encoding="utf-8") as f:
+        content = f.read()
+
+    # Match VTT blocks: timestamp line followed by optional <v> text
+    pattern = re.compile(
+        r'(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})\s*\n'
+        r'(?:<v\s+([^>]+)>\s*)?(.+?)(?=\n\d{2}:\d{2}:\d{2}|$)',
+        re.DOTALL
+    )
+
+    def _ts_to_sec(ts):
+        h, m, s = ts.split(':')
+        return float(h) * 3600 + float(m) * 60 + float(s.replace(',', '.'))
+
+    for m in pattern.finditer(content):
+        start = _ts_to_sec(m.group(1))
+        end = _ts_to_sec(m.group(2))
+        speaker = m.group(3) or None
+        text = m.group(4).strip()
+        # Remove closing </v> tag if present
+        text = re.sub(r'</v>\s*$', '', text)
+        if text:
+            segments.append({
+                "start": start,
+                "end": end,
+                "text": text,
+                "speaker": speaker,
+                "language": source_lang,
+            })
+
+    return segments
+
+
 def process_speaker(
     input_path: str,
     output_dir: str = "",
@@ -1142,94 +1182,118 @@ def process_speaker(
         suffix = f"_{start_time.replace(':', '')}_{end_time.replace(':', '')}"
     else:
         suffix = ""
-    output_wav = f"{base_name}{suffix}.wav" if suffix else ""
-    audio_path = prepare_audio(
-        input_path,
-        out_dir,
-        start_time=start_time or None,
-        end_time=end_time or None,
-        output_wav=output_wav,
-        verbose=verbose,
-    )
 
-    raw_json_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia_raw.json") if save_json else None
-    diagnostics_path = os.path.join(out_dir, f"{base_name}{suffix}_speaker_segments.json") if save_json else None
-    provider = asr_provider
-    segments: list[dict[str, Any]]
-    gladia_raw_result: dict[str, Any] | None = None
-
-    if asr_provider == "auto":
-        if gladia_key or os.getenv("GLADIA_API_KEY"):
-            provider = "gladia"
-        else:
-            provider = "sensevoice"
-
-    if provider == "gladia":
-        key = gladia_key or os.getenv("GLADIA_API_KEY")
-        if not key:
-            raise ValueError("Gladia provider requires --gladia-key or GLADIA_API_KEY")
-        segments, gladia_raw_result = transcribe_with_gladia(
-            audio_path,
-            key,
-            source_lang=source_lang,
-            interpreter_lang=source_lang,  # same language — no code switching
-            speaker_labels=speaker_labels,
-            speaker_count=speaker_count,
-            save_raw_json=raw_json_path,
-            verbose=verbose,
-            code_switching=False,
-        )
-    elif provider == "sensevoice":
-        try:
-            segments = transcribe_with_sensevoice(
-                audio_path, speaker_labels=speaker_labels, verbose=verbose
-            )
-        except Exception as e:
-            if asr_provider == "auto":
-                logger.warning(f"SenseVoice failed ({e}), falling back to Whisper")
-                provider = "whisper"
-                segments = transcribe_with_whisper_chunks(
-                    audio_path, model_size=transcribe_model, verbose=verbose
-                )
-            else:
-                raise
-    elif provider == "whisper":
-        segments = transcribe_with_whisper_chunks(
-            audio_path, model_size=transcribe_model, verbose=verbose
-        )
-    else:
-        raise ValueError(f"Unknown ASR provider: {asr_provider}")
-
-    # Shift timestamps back when --start-time/--end-time were used.
-    timestamp = parse_timestamp(start_time or None, end_time or None)
-    offset = float((timestamp or {}).get("start") or 0)
-    if offset:
-        for segment in segments:
-            segment["start"] = float(segment.get("start") or 0) + offset
-            segment["end"] = float(segment.get("end") or 0) + offset
-
-    # Label all segments with the source language (no filtering needed)
-    for seg in segments:
-        if not seg.get("language"):
-            seg["language"] = source_lang
-
-    merged = merge_adjacent_segments(segments)
-
-    # Count distinct speakers
-    speakers_seen = {
-        seg.get("speaker") for seg in merged if seg.get("speaker")
-    }
-    num_speakers = len(speakers_seen) or 1
-
-    # --- Topic grouping → rewrite → translate ---
-
-    # 1. Save Gladia raw VTT (if using Gladia)
-    gladia_vtt_path: str | None = None
-    if provider == "gladia" and gladia_raw_result is not None:
-        gladia_vtt_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia.vtt")
-        write_gladia_vtt(gladia_raw_result, gladia_vtt_path)
+    # If input is a text file (VTT, SRT, etc.), parse it directly — no audio extraction needed
+    audio_path = input_path  # default; overwritten for audio/video inputs
+    if is_text_file(input_path):
         if verbose:
-            logger.debug("Saved raw Gladia VTT: %s", gladia_vtt_path)
+            logger.debug("Input is a text file (%s); skipping audio/ASR pipeline", input_path)
+        segments = _parse_vtt_to_segments(input_path, source_lang=source_lang)
+        # Label all segments with the source language (no filtering needed)
+        for seg in segments:
+            if not seg.get("language"):
+                seg["language"] = source_lang
+
+        merged = merge_adjacent_segments(segments)
+        speakers_seen = {seg.get("speaker") for seg in merged if seg.get("speaker")}
+        num_speakers = len(speakers_seen) or 1
+
+        # Skip ASR/provider/vtt-raw sections; jump straight to rewrite/translate
+        provider = "text"
+        gladia_vtt_path = None
+        diagnostics_path = (
+            os.path.join(out_dir, f"{base_name}{suffix}_speaker_segments.json")
+            if save_json
+            else None
+        )
+        # ... continue with rewrite/translate logic below
+    else:
+        output_wav = f"{base_name}{suffix}.wav" if suffix else ""
+        audio_path = prepare_audio(
+            input_path,
+            out_dir,
+            start_time=start_time or None,
+            end_time=end_time or None,
+            output_wav=output_wav,
+            verbose=verbose,
+        )
+
+        raw_json_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia_raw.json") if save_json else None
+        diagnostics_path = os.path.join(out_dir, f"{base_name}{suffix}_speaker_segments.json") if save_json else None
+        provider = asr_provider
+        segments: list[dict[str, Any]]
+        gladia_raw_result: dict[str, Any] | None = None
+
+        if asr_provider == "auto":
+            if gladia_key or os.getenv("GLADIA_API_KEY"):
+                provider = "gladia"
+            else:
+                provider = "sensevoice"
+
+        if provider == "gladia":
+            key = gladia_key or os.getenv("GLADIA_API_KEY")
+            if not key:
+                raise ValueError("Gladia provider requires --gladia-key or GLADIA_API_KEY")
+            segments, gladia_raw_result = transcribe_with_gladia(
+                audio_path,
+                key,
+                source_lang=source_lang,
+                interpreter_lang=source_lang,  # same language — no code switching
+                speaker_labels=speaker_labels,
+                speaker_count=speaker_count,
+                save_raw_json=raw_json_path,
+                verbose=verbose,
+                code_switching=False,
+            )
+        elif provider == "sensevoice":
+            try:
+                segments = transcribe_with_sensevoice(
+                    audio_path, speaker_labels=speaker_labels, verbose=verbose
+                )
+            except Exception as e:
+                if asr_provider == "auto":
+                    logger.warning(f"SenseVoice failed ({e}), falling back to Whisper")
+                    provider = "whisper"
+                    segments = transcribe_with_whisper_chunks(
+                        audio_path, model_size=transcribe_model, verbose=verbose
+                    )
+                else:
+                    raise
+        elif provider == "whisper":
+            segments = transcribe_with_whisper_chunks(
+                audio_path, model_size=transcribe_model, verbose=verbose
+            )
+        else:
+            raise ValueError(f"Unknown ASR provider: {asr_provider}")
+
+        # Shift timestamps back when --start-time/--end-time were used.
+        timestamp = parse_timestamp(start_time or None, end_time or None)
+        offset = float((timestamp or {}).get("start") or 0)
+        if offset:
+            for segment in segments:
+                segment["start"] = float(segment.get("start") or 0) + offset
+                segment["end"] = float(segment.get("end") or 0) + offset
+
+        # Label all segments with the source language (no filtering needed)
+        for seg in segments:
+            if not seg.get("language"):
+                seg["language"] = source_lang
+
+        merged = merge_adjacent_segments(segments)
+
+        # Count distinct speakers
+        speakers_seen = {
+            seg.get("speaker") for seg in merged if seg.get("speaker")
+        }
+        num_speakers = len(speakers_seen) or 1
+
+        # --- Save Gladia raw VTT (if using Gladia) ---
+        gladia_vtt_path = None
+        if provider == "gladia" and gladia_raw_result is not None:
+            gladia_vtt_path = os.path.join(out_dir, f"{base_name}{suffix}_gladia.vtt")
+            write_gladia_vtt(gladia_raw_result, gladia_vtt_path)
+            if verbose:
+                logger.debug("Saved raw Gladia VTT: %s", gladia_vtt_path)
 
     if rewrite_mode == "zh-interview":
         speaker_chunks = format_speaker_turns_for_rewrite(merged)
@@ -1314,6 +1378,7 @@ def process_speaker(
     write_english_markdown(merged, transcript_md)
 
     if diagnostics_path:
+        _diagnostics_audio_path = input_path if is_text_file(input_path) else audio_path
         with open(diagnostics_path, "w", encoding="utf-8") as f:
             json.dump(
                 {
@@ -1321,7 +1386,7 @@ def process_speaker(
                     "source_lang": source_lang,
                     "speaker_count": speaker_count,
                     "rewrite_mode": rewrite_mode,
-                    "audio_path": audio_path,
+                    "audio_path": _diagnostics_audio_path,
                     "merged_segments": merged,
                     "raw_segments": segments,
                 },
