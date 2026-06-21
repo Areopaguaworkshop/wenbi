@@ -8,6 +8,8 @@ It supports:
 - Translation (`translate`) with **DeepL first**, then **LLM fallback**
 - English interview rewriting (`en-en`) with speaker-separated output
 - Chinese interview rewriting (`zh-zh`) with speaker-separated output
+- English/Chinese bilingual audio extraction (`en-zh`) — keep English, translate to Chinese
+- Single-language multi-speaker diarization (`speaker`) with rewrite + translate
 - PPT-style slide + speech combination (`ppt`)
 - Batch directory processing (`wenbi-batch`)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/wenbi?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/wenbi)
@@ -54,6 +56,18 @@ Chinese interview rewrite:
 
 ```bash
 wenbi zh-zh interview.mp4 --gladia-key "$GLADIA_API_KEY"
+```
+
+English/Chinese bilingual audio (keep English, translate to Chinese):
+
+```bash
+wenbi en-zh bilingual.mp4 --gladia-key "$GLADIA_API_KEY"
+```
+
+Single-language multi-speaker (diarize, rewrite, translate):
+
+```bash
+wenbi speaker panel.mp4 --source-lang en --gladia-key "$GLADIA_API_KEY"
 ```
 
 PPT workflow:
@@ -130,6 +144,44 @@ Key options:
 
 The rewrite preserves speaker labels and adds a `## 需要确认的问题` section when speaker roles, names, terms, or ambiguous ASR phrases need human confirmation.
 
+### `en-zh` (`enzh`)
+Extract English from English/Chinese bilingual audio (e.g. interpreted interviews), drop the interpreter language, and translate the kept English into Chinese using DeepL first with LLM fallback.
+
+```bash
+wenbi en-zh <input> [options]
+```
+
+Key options:
+- `--asr-provider auto|gladia|sensevoice|whisper` (default: `gladia`)
+- `--source-lang` (default: `en`) — language to keep
+- `--interpreter-lang` (default: `zh`) — language to drop
+- `--gladia-key` (or `GLADIA_API_KEY` env var)
+- `--lang` — target translation language (default: `Chinese`)
+- `--no-speaker-labels` — disable speaker diarization
+- `--save-json` — write segment diagnostics and raw provider JSON
+- `--start-time`, `--end-time` (media/URL)
+
+Outputs include the kept-language VTT/Markdown, a bilingual Markdown side-by-side, and (optionally) a rewritten English Markdown and diagnostics JSON.
+
+### `speaker` (`sp`)
+Transcribe single-language multi-speaker audio with diarization, then rewrite and translate it. Same engine as `en-en`/`zh-zh` but without the interview-style rewrite defaults — use it for panels, podcasts, and any multi-speaker source where you want to keep the source language.
+
+```bash
+wenbi speaker <input> [options]
+```
+
+Key options:
+- `--asr-provider auto|gladia|sensevoice|whisper` (default: `gladia`)
+- `--source-lang` (default: `en`)
+- `--speaker-count` (default: provider decides)
+- `--gladia-key` (or `GLADIA_API_KEY` env var)
+- `--lang` — target translation language (default: `Chinese`)
+- `--no-speaker-labels` — disable speaker diarization
+- `--save-json` — write segment diagnostics and raw provider JSON
+- `--start-time`, `--end-time` (media/URL)
+
+Outputs a transcript VTT, transcript Markdown, rewritten Markdown, and (when translation is requested) a bilingual Markdown.
+
 ### `ppt` (`p`)
 Extract slides from video, align with speech, and export combined markdown.
 
@@ -174,6 +226,8 @@ Typical outputs:
 - `*_academic.md`
 - `*_en.md`, `*_en.vtt` (English interview transcripts)
 - `*_zh.md`, `*_zh.vtt` (Chinese interview transcripts)
+- `*_bilingual.md` (en-zh and speaker translated output)
+- `*_diagnostics.json` (when `--save-json` is used)
 - `*_combine.md` / `*_combine_clean.md` (PPT workflows)
 - `*.vtt`, `*.csv` (depending on flow)
 
