@@ -39,7 +39,7 @@ dependencies = [
     "deepl>=1.18.0",
 ]
 readme = "README.md"
-requires-python = ">= 3.10"
+requires-python = ">= 3.11"
 
 [project.scripts]
 wenbi = "wenbi.cli:main"
