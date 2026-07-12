@@ -107,10 +107,51 @@ def map_language_to_deepl_code(lang_name, verbose=False):
     return deepl_code
 
 
+def _get_patristic_glossary_id(translator, source_lang="EN", target_lang="ZH"):
+    """Create or reuse a DeepL glossary from the patristic glossary dict.
+
+    Returns the glossary ID, or None if the glossary is unavailable.
+    ponytail: caches the glossary ID on the translator object to avoid
+    re-creating it on every call. DeepL glossaries persist server-side.
+    """
+    cache_key = f"_patristic_glossary_id_{source_lang}_{target_lang}"
+    cached = getattr(translator, cache_key, None)
+    if cached:
+        return cached
+
+    try:
+        from wenbi.patristic_glossary import get_glossary_for_deepl
+
+        pairs = get_glossary_for_deepl()
+        if not pairs:
+            return None
+
+        # DeepL Python API takes entries as a dict, max 1000 term pairs
+        entries = dict(pairs[:1000])
+        glossary = translator.create_glossary(
+            name="patristic-en-zh",
+            source_lang=source_lang,
+            target_lang=target_lang,
+            entries=entries,
+        )
+        setattr(translator, cache_key, glossary.glossary_id)
+        return glossary.glossary_id
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Failed to create patristic glossary: {e}")
+        return None
+
+
 def translate_with_deepl(
-    translator, chunk, target_language, verbose=False, max_retries=2
+    translator, chunk, target_language, verbose=False, max_retries=2,
+    use_glossary=False
 ):
-    """Translate a single chunk using DeepL"""
+    """Translate a single chunk using DeepL.
+
+    When use_glossary=True, creates a DeepL glossary from the patristic
+    terminology dict and passes it to translate_text for domain-specific
+    term overrides.
+    """
     logger = logging.getLogger(__name__)
 
     if not chunk or not chunk.strip():
@@ -123,9 +164,16 @@ def translate_with_deepl(
             f"Translating chunk ({len(chunk)} chars) to {target_language} ({deepl_code})"
         )
 
+    glossary_id = None
+    if use_glossary and deepl_code == "ZH":
+        glossary_id = _get_patristic_glossary_id(translator)
+
     for attempt in range(max_retries):
         try:
-            result = translator.translate_text(chunk, target_lang=deepl_code)
+            kwargs = {"target_lang": deepl_code}
+            if glossary_id:
+                kwargs["glossary"] = glossary_id
+            result = translator.translate_text(chunk, **kwargs)
             translated = result.text
 
             if verbose:
