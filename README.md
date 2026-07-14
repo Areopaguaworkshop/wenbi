@@ -1,6 +1,6 @@
 # Wenbi
 
-Wenbi converts media and text into structured Markdown, then rewrites or translates it.
+Wenbi is a CLI-first toolkit that turns media (video/audio/URL) and text into structured Markdown, then rewrites or translates the result. It is built around the `ollama/qwen3.5:cloud` rewrite/translation model by default, with DeepL as the preferred translator and an LLM fallback.
 
 It supports:
 - Video/audio/URL transcription to VTT/Markdown
@@ -13,10 +13,53 @@ It supports:
 - PPT-style slide + speech combination (`ppt`)
 - Batch directory processing (`wenbi-batch`)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/wenbi?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/wenbi)
+
+## How it works
+
+Every subcommand follows the same pipeline; the only difference is which stages run and the default options:
+
+```
+input (media / URL / text / subtitles)
+  │
+  1. Download & extract        ── yt-dlp for URLs, ffmpeg/pydub for media → audio
+  │
+  2. ASR / transcribe          ── auto | gladia | sensevoice | whisper
+  │                                → VTT + raw transcript
+  │
+  3. Diarize (optional)        ── gladia / pyannote → speaker labels
+  │
+  4. Rewrite (optional)        ── LLM (default ollama/qwen3.5:cloud)
+  │                                rewrites oral speech into written style,
+  │                                preserves speaker turns for interview flows
+  │
+  5. Translate (optional)      ── DeepL first (needs DEEPL_API_KEY),
+  │                                LLM fallback if DeepL unavailable/fails
+  │
+  6. Slide combine (ppt only)  ── frame extraction + OCR → slides aligned
+  │                                with speech by timestamp
+  │
+  └── outputs in --output-dir:   *_rewritten.md, *_translated.md,
+                                  *_bilingual.md, *_zh.md, *_en.md,
+                                  *_combine.md, *_diagnostics.json, *.vtt, *.csv
+```
+
+Subcommand → pipeline mapping:
+
+| Command | Stages |
+|---|---|
+| `rewrite` / `rw` | 1 → 2 → 4 |
+| `translate` / `tr` | 1 (or text-only) → 5 |
+| `en-en` / `enen` | 1 → 2 → 3 → 4 (interview rewrite defaults) |
+| `zh-zh` / `zhzh` | 1 → 2 → 3 → 4 (interview rewrite defaults) |
+| `en-zh` / `enzh` | 1 → 2 → 3 (keep EN, drop ZH) → 5 |
+| `speaker` / `sp` | 1 → 2 → 3 → 4 → 5 |
+| `ppt` / `p` | 1 → 2 → 6 (slides + speech, optional rewrite/translate) |
+| `wenbi-batch` | runs one of the above over every media file in a directory |
+
 ## Install
 
 Prerequisites:
-- Python 3.10+
+- Python 3.11+
 - `ffmpeg` in PATH
 
 Install:

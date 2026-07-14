@@ -7,7 +7,6 @@ import sys
 import yaml
 
 from wenbi.download import download_all
-from wenbi.gui import launch_gui
 from wenbi.main import process_input
 from wenbi.model import (
     rewrite,
@@ -2227,7 +2226,6 @@ def main():
     parser.add_argument(
         "--output-dir", "-o", default="", help="Output directory (optional)"
     )
-    parser.add_argument("--gui", "-g", action="store_true", help="Launch Gradio GUI")
     parser.add_argument("--llm", default="", help="LLM model identifier (optional)")
     parser.add_argument(
         "--transcribe-lang", "-s", default="", help="Transcribe language (optional)"
@@ -2406,13 +2404,6 @@ def main():
             )
     else:
         params["timestamp"] = None
-
-    # Handle GUI mode
-    if args.gui:
-        if args.verbose:
-            logger.debug("Launching Gradio GUI")
-        launch_gui()
-        return
 
     # Otherwise, run CLI mode (input must be provided)
     if not args.input:
