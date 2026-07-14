@@ -268,8 +268,6 @@ def validate_transcription_args(args):
 
     # Check for transcription-related arguments
     transcription_args = []
-    if hasattr(args, "transcribe_model") and args.transcribe_model != "paraformer-zh":
-        transcription_args.append("--transcribe-model")
     if hasattr(args, "multi_language") and args.multi_language:
         transcription_args.append("--multi-language")
     if hasattr(args, "transcribe_lang") and args.transcribe_lang:
@@ -311,7 +309,7 @@ def handle_rewrite_command(args):
         "lang": args.lang or config.get("lang", "Chinese"),
         "subcommand": {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite"),
         "enable_speakers": style == "zh-speaker",
-        "transcribe_model": "paraformer-zh" if style == "zh-speaker" else (args.transcribe_model or config.get("transcribe_model", "large-v3")),
+        "asr_provider": getattr(args, "asr_provider", "auto"),
         "multi_language": args.multi_language or config.get("multi_language", False),
         "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
         "output_wav": args.output_wav or config.get("output_wav", ""),
@@ -396,8 +394,7 @@ def handle_translate_command(args):
         "temperature": args.temperature or config.get("temperature", 0.1),
         "lang": args.lang or config.get("lang", "Chinese"),
         "subcommand": "translate",
-        "transcribe_model": args.transcribe_model
-        or config.get("transcribe_model", "large-v3"),
+        "asr_provider": getattr(args, "asr_provider", "auto"),
         "multi_language": args.multi_language or config.get("multi_language", False),
         "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
         "output_wav": args.output_wav or config.get("output_wav", ""),
@@ -405,6 +402,8 @@ def handle_translate_command(args):
         "keep_original_lang": args.keep_original_lang or config.get("keep_original_lang", False),
         "use_deepl": True,
         "deepl_key": deepl_key,
+        "use_glossary": getattr(args, "glossary", True),
+        "glossary_file": getattr(args, "glossary_file", None),
         "verbose": args.verbose,
     }
 
@@ -461,11 +460,10 @@ def handle_en_zh_command(args):
             start_time=args.start_time,
             end_time=args.end_time,
             asr_provider=args.asr_provider,
-            transcribe_model=args.transcribe_model,
             source_lang=args.source_lang,
             interpreter_lang=args.interpreter_lang,
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/qwen3.5:cloud",
+            llm=args.llm or "ollama/glm-5.2:cloud",
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
@@ -475,6 +473,8 @@ def handle_en_zh_command(args):
             speaker_labels=args.speaker_labels,
             save_json=args.save_json,
             verbose=args.verbose,
+            use_glossary=getattr(args, "glossary", True),
+            glossary_file=getattr(args, "glossary_file", None),
         )
     except Exception as e:
         if args.verbose:
@@ -515,10 +515,9 @@ def handle_speaker_command(args):
             start_time=args.start_time,
             end_time=args.end_time,
             asr_provider=args.asr_provider,
-            transcribe_model=args.transcribe_model,
             source_lang=args.source_lang,
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/qwen3.5:cloud",
+            llm=args.llm or "ollama/glm-5.2:cloud",
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
@@ -529,6 +528,8 @@ def handle_speaker_command(args):
             speaker_count=getattr(args, "speaker_count", None),
             save_json=args.save_json,
             verbose=args.verbose,
+            use_glossary=getattr(args, "glossary", True),
+            glossary_file=getattr(args, "glossary_file", None),
         )
     except Exception as e:
         if args.verbose:
@@ -569,10 +570,9 @@ def handle_zh_zh_command(args):
             start_time=args.start_time,
             end_time=args.end_time,
             asr_provider=args.asr_provider,
-            transcribe_model=args.transcribe_model,
             source_lang="zh",
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/qwen3.5:cloud",
+            llm=args.llm or "ollama/glm-5.2:cloud",
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
@@ -623,10 +623,9 @@ def handle_en_en_command(args):
             start_time=args.start_time,
             end_time=args.end_time,
             asr_provider=args.asr_provider,
-            transcribe_model=args.transcribe_model,
             source_lang="en",
             target_language=args.lang or "English",
-            llm=args.llm or "ollama/qwen3.5:cloud",
+            llm=args.llm or "ollama/glm-5.2:cloud",
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
@@ -636,6 +635,8 @@ def handle_en_en_command(args):
             speaker_labels=args.speaker_labels,
             speaker_count=args.speaker_count,
             rewrite_mode="en-interview",
+            use_glossary=getattr(args, "glossary", True),
+            glossary_file=getattr(args, "glossary_file", None),
             save_json=args.save_json,
             verbose=args.verbose,
         )
@@ -698,31 +699,14 @@ def add_global_args(subparser):
         default=0.1,
         help="LLM temperature parameter (default: 0.1)",
     )
-    # Transcription-related arguments (only for video/audio/URL inputs)
+    # ASR provider (replaces --transcribe-model; whisper model is hardcoded
+    # large-v3-turbo inside asr.py)
     subparser.add_argument(
-        "--transcribe-model",
-        "-tsm",
-        default="paraformer-zh",
-        choices=[
-            "paraformer-zh",
-            "paraformer-en",
-            # Backward-compatible aliases for old Qwen3 defaults
-            "1.7B",
-            "0.6B",
-            "tiny",
-            "base",
-            "small",
-            "medium",
-            "large-v1",
-            "large-v2",
-            "large-v3",
-            "large-v3-turbo",
-            "turbo",
-        ],
-        help=(
-            "ASR model: paraformer-zh (FunASR default, recommended), paraformer-en, "
-            "or whisper models for fallback. 1.7B/0.6B are kept as aliases."
-        ),
+        "--asr-provider",
+        "-asr",
+        choices=["auto", "gladia", "funasr", "whisper"],
+        default="auto",
+        help="ASR backend: auto (gladia if GLADIA_API_KEY else funasr), gladia, funasr (local), or whisper (default: auto)",
     )
     subparser.add_argument(
         "--multi-language",
@@ -1261,7 +1245,7 @@ def handle_ppt_command(args):
                 "timeout": args.timeout,
                 "temperature": args.temperature,
                 "lang": args.lang,
-                "transcribe_model": "paraformer-zh" if style == "zh-speaker" else args.transcribe_model,
+                "asr_provider": "funasr" if style == "zh-speaker" else getattr(args, "asr_provider", "auto"),
                 "multi_language": args.multi_language,
                 "transcribe_lang": args.transcribe_lang,
                 "cite_timestamps": cite_timestamps,
@@ -1905,6 +1889,18 @@ def main():
             "translate", aliases=["tr"], help="Translate text"
         )
         add_global_args(translate_parser)
+        translate_parser.add_argument(
+            "--glossary",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Apply EN→ZH glossary for term consistency (DeepL glossary API + LLM prompt). No-op when target language is not Chinese (default: enabled).",
+        )
+        translate_parser.add_argument(
+            "--glossary-file",
+            type=str,
+            default=None,
+            help="Path to user glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
+        )
         translate_parser.set_defaults(func=handle_translate_command)
 
         # English-to-Chinese bilingual audio subcommand
@@ -1914,12 +1910,6 @@ def main():
             help="Extract English from English/Chinese bilingual audio and translate it to Chinese",
         )
         add_global_args(en_zh_parser)
-        en_zh_parser.add_argument(
-            "--asr-provider",
-            choices=["auto", "gladia", "sensevoice", "whisper"],
-            default="gladia",
-            help="ASR backend for bilingual separation (default: gladia)",
-        )
         en_zh_parser.add_argument(
             "--source-lang",
             default="en",
@@ -1953,9 +1943,20 @@ def main():
             default=False,
             help="Save normalized segment diagnostics and raw provider JSON when available",
         )
+        en_zh_parser.add_argument(
+            "--glossary",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Apply EN→ZH glossary for term consistency (DeepL glossary API + LLM prompt). No-op when target language is not Chinese (default: enabled).",
+        )
+        en_zh_parser.add_argument(
+            "--glossary-file",
+            type=str,
+            default=None,
+            help="Path to user glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
+        )
         en_zh_parser.set_defaults(
             func=handle_en_zh_command,
-            transcribe_model="large-v3-turbo",
         )
 
         # English interview subcommand
@@ -1965,12 +1966,6 @@ def main():
             help="Transcribe and rewrite English interviews with speaker-separated output",
         )
         add_global_args(en_en_parser)
-        en_en_parser.add_argument(
-            "--asr-provider",
-            choices=["auto", "gladia", "sensevoice", "whisper"],
-            default="gladia",
-            help="ASR backend for English interview transcription (default: gladia)",
-        )
         en_en_parser.add_argument(
             "--gladia-key",
             default="",
@@ -2000,9 +1995,13 @@ def main():
             default=False,
             help="Save segment diagnostics and raw provider JSON when available",
         )
+        en_en_parser.add_argument(
+            "--glossary-file",
+            default=None,
+            help="Path to a custom glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
+        )
         en_en_parser.set_defaults(
             func=handle_en_en_command,
-            transcribe_model="large-v3-turbo",
         )
 
         # Chinese interview subcommand
@@ -2012,12 +2011,6 @@ def main():
             help="Transcribe and rewrite Chinese interviews with speaker-separated output",
         )
         add_global_args(zh_zh_parser)
-        zh_zh_parser.add_argument(
-            "--asr-provider",
-            choices=["auto", "gladia", "sensevoice", "whisper"],
-            default="gladia",
-            help="ASR backend for Chinese interview transcription (default: gladia)",
-        )
         zh_zh_parser.add_argument(
             "--gladia-key",
             default="",
@@ -2049,7 +2042,6 @@ def main():
         )
         zh_zh_parser.set_defaults(
             func=handle_zh_zh_command,
-            transcribe_model="large-v3-turbo",
         )
 
         # Speaker-aware single-language subcommand
@@ -2059,12 +2051,6 @@ def main():
             help="Transcribe single-language multi-speaker audio with diarization, rewrite, and translate",
         )
         add_global_args(speaker_parser)
-        speaker_parser.add_argument(
-            "--asr-provider",
-            choices=["auto", "gladia", "sensevoice", "whisper"],
-            default="gladia",
-            help="ASR backend for transcription with diarization (default: gladia)",
-        )
         speaker_parser.add_argument(
             "--source-lang",
             default="en",
@@ -2099,9 +2085,20 @@ def main():
             default=False,
             help="Save segment diagnostics and raw provider JSON when available",
         )
+        speaker_parser.add_argument(
+            "--glossary",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Apply EN→ZH glossary for term consistency (DeepL glossary API + LLM prompt). No-op when target language is not Chinese (default: enabled).",
+        )
+        speaker_parser.add_argument(
+            "--glossary-file",
+            type=str,
+            default=None,
+            help="Path to user glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
+        )
         speaker_parser.set_defaults(
             func=handle_speaker_command,
-            transcribe_model="large-v3-turbo",
         )
 
         # PPT subcommand - extract slides from video and combine with speech
@@ -2202,11 +2199,22 @@ def main():
             default="rewrite",
             help="Rewrite style: rewrite (default), academic, or zh-speaker (Chinese with speaker diarization)",
         )
+        # ponytail: PPT flow still threads transcribe_model to ppt_slide/cropped_slide
+        # helpers (out of scope for the ASR unification); keep a PPT-local flag.
+        ppt_parser.add_argument(
+            "--transcribe-model",
+            "-tsm",
+            default="large-v3-turbo",
+            choices=[
+                "tiny", "base", "small", "medium",
+                "large-v1", "large-v2", "large-v3", "large-v3-turbo", "turbo",
+            ],
+            help="Whisper model size for the PPT speech path (default: large-v3-turbo)",
+        )
         ppt_parser.set_defaults(func=handle_ppt_command)
 
         print("Debug: About to parse arguments...")
         args = parser.parse_args()
-        print(f"Debug: Arguments parsed. Command: {args.command}")
 
         print("Debug: About to execute command function...")
         args.func(args)
@@ -2268,21 +2276,11 @@ def main():
         help="LLM temperature parameter (default: 0.1)",
     )
     parser.add_argument(
-        "--transcribe-model",
-        "-tsm",
-        default="large-v3-turbo",
-        choices=[
-            "tiny",
-            "base",
-            "small",
-            "medium",
-            "large-v1",
-            "large-v2",
-            "large-v3",
-            "large-v3-turbo",
-            "turbo",
-        ],
-        help="Whisper model size for transcription (default: large-v3-turbo)",
+        "--asr-provider",
+        "-asr",
+        choices=["auto", "gladia", "funasr", "whisper"],
+        default="auto",
+        help="ASR backend: auto (gladia if GLADIA_API_KEY else funasr), gladia, funasr (local), or whisper (default: auto)",
     )
     parser.add_argument(
         "--output_wav",
@@ -2378,8 +2376,7 @@ def main():
         "max_tokens": args.max_tokens or config.get("max_tokens", 64000),
         "timeout": args.timeout or config.get("timeout", 3600),
         "temperature": args.temperature or config.get("temperature", 0.1),
-        "transcribe_model": args.transcribe_model
-        or config.get("transcribe_model", "large-v3-turbo"),
+        "asr_provider": getattr(args, "asr_provider", "auto"),
         "output_wav": args.output_wav or config.get("output_wav", ""),
         "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
         "keep_original_lang": args.keep_original_lang or config.get("keep_original_lang", False),

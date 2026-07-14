@@ -23,17 +23,22 @@ input (media / URL / text / subtitles)
   │
   1. Download & extract        ── yt-dlp for URLs, ffmpeg/pydub for media → audio
   │
-  2. ASR / transcribe          ── auto | gladia | sensevoice | whisper
+  2. ASR / transcribe          ── auto | gladia | funasr | whisper
+  │                                gladia is the default when GLADIA_API_KEY is set;
+  │                                funasr (paraformer-zh, local) is the fallback;
+  │                                whisper is the third fallback.
   │                                → VTT + raw transcript
   │
-  3. Diarize (optional)        ── gladia / pyannote → speaker labels
+  3. Diarize (optional)        ── gladia / funasr cam++ → speaker labels
   │
   4. Rewrite (optional)        ── LLM (default ollama/qwen3.5:cloud)
   │                                rewrites oral speech into written style,
   │                                preserves speaker turns for interview flows
   │
   5. Translate (optional)      ── DeepL first (needs DEEPL_API_KEY),
-  │                                LLM fallback if DeepL unavailable/fails
+  │                                LLM fallback if DeepL unavailable/fails.
+  │                                EN→ZH glossary applied by default
+  │                                (DeepL glossary API + LLM prompt).
   │
   6. Slide combine (ppt only)  ── frame extraction + OCR → slides aligned
   │                                with speech by timestamp
@@ -61,6 +66,7 @@ Subcommand → pipeline mapping:
 Prerequisites:
 - Python 3.11+
 - `ffmpeg` in PATH
+- **Gladia API key** (optional but recommended): set `GLADIA_API_KEY` for cloud ASR (the default for all audio-capable subcommands). Free tier is 10h/month — see https://www.gladia.io/pricing. Without the key, ASR auto-falls-back to FunASR (local, no key needed, requires the heavy ML deps).
 
 Install:
 
@@ -132,6 +138,7 @@ Key options:
 - `--style rewrite|academic`
 - `--lang`
 - `--llm`
+- `--asr-provider auto|gladia|funasr|whisper`
 - `--cite-timestamps`
 - `--start-time`, `--end-time` (media/URL)
 
@@ -145,6 +152,9 @@ wenbi translate <input> --lang <target> [options]
 Key options:
 - `--deepl-key` (or `DEEPL_API_KEY` env var)
 - `--llm` (fallback model)
+- `--asr-provider auto|gladia|funasr|whisper`
+- `--glossary` / `--no-glossary` (default: enabled, EN→ZH term consistency)
+- `--glossary-file path.json` (custom `{english: chinese}` glossary)
 - `--keep-original-lang`
 - `--cite-timestamps`
 
@@ -164,7 +174,7 @@ wenbi en-en <input> [options]
 
 Key options:
 - `--speaker-count` (default: `2`)
-- `--asr-provider auto|gladia|sensevoice|whisper`
+- `--asr-provider auto|gladia|funasr|whisper`
 - `--gladia-key` (or `GLADIA_API_KEY` env var)
 - `--llm` (default: `ollama/qwen3.5:cloud`)
 - `--start-time`, `--end-time` (media/URL)
@@ -180,7 +190,7 @@ wenbi zh-zh <input> [options]
 
 Key options:
 - `--speaker-count` (default: `2`)
-- `--asr-provider auto|gladia|sensevoice|whisper`
+- `--asr-provider auto|gladia|funasr|whisper`
 - `--gladia-key` (or `GLADIA_API_KEY` env var)
 - `--llm` (default: `ollama/qwen3.5:cloud`)
 - `--start-time`, `--end-time` (media/URL)
@@ -195,11 +205,13 @@ wenbi en-zh <input> [options]
 ```
 
 Key options:
-- `--asr-provider auto|gladia|sensevoice|whisper` (default: `gladia`)
+- `--asr-provider auto|gladia|funasr|whisper` (default: `auto`)
 - `--source-lang` (default: `en`) — language to keep
 - `--interpreter-lang` (default: `zh`) — language to drop
 - `--gladia-key` (or `GLADIA_API_KEY` env var)
 - `--lang` — target translation language (default: `Chinese`)
+- `--glossary` / `--no-glossary` (default: enabled, EN→ZH term consistency)
+- `--glossary-file path.json` (custom `{english: chinese}` glossary)
 - `--no-speaker-labels` — disable speaker diarization
 - `--save-json` — write segment diagnostics and raw provider JSON
 - `--start-time`, `--end-time` (media/URL)
@@ -214,11 +226,13 @@ wenbi speaker <input> [options]
 ```
 
 Key options:
-- `--asr-provider auto|gladia|sensevoice|whisper` (default: `gladia`)
+- `--asr-provider auto|gladia|funasr|whisper` (default: `auto`)
 - `--source-lang` (default: `en`)
 - `--speaker-count` (default: provider decides)
 - `--gladia-key` (or `GLADIA_API_KEY` env var)
 - `--lang` — target translation language (default: `Chinese`)
+- `--glossary` / `--no-glossary` (default: enabled, EN→ZH term consistency)
+- `--glossary-file path.json` (custom `{english: chinese}` glossary)
 - `--no-speaker-labels` — disable speaker diarization
 - `--save-json` — write segment diagnostics and raw provider JSON
 - `--start-time`, `--end-time` (media/URL)
@@ -256,10 +270,21 @@ Used by subcommands:
 - `--max-tokens`
 - `--timeout`
 - `--temperature`
-- `--transcribe-model`
+- `--asr-provider auto|gladia|funasr|whisper`
 - `--transcribe-lang`
 - `--multi-language`
 - `--verbose`
+
+## Glossary
+
+Translation subcommands (`translate`, `en-zh`, `speaker`) apply a built-in **EN→ZH patristic glossary** by default for term consistency. This covers ~800 Orthodox Christian / patristic terms (e.g. *theosis* → 神化, *theoria* → 静观, *Origen* → 奥利金).
+
+- `--glossary` / `--no-glossary` — toggle the glossary (default: enabled). No-op when the target language is not Chinese.
+- `--glossary-file path.json` — supply a custom glossary JSON (`{english: chinese}` dict). Overrides the built-in patristic glossary.
+
+The glossary is wired into both translation paths:
+- **DeepL**: creates a DeepL server-side glossary from the term pairs and passes it to `translate_text`.
+- **LLM fallback**: injects the glossary as a `glossary` field on the DSPy `TranslateSignature` prompt.
 
 ## Output Files
 

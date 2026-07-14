@@ -107,29 +107,37 @@ def map_language_to_deepl_code(lang_name, verbose=False):
     return deepl_code
 
 
-def _get_patristic_glossary_id(translator, source_lang="EN", target_lang="ZH"):
+def _get_patristic_glossary_id(translator, source_lang="EN", target_lang="ZH", glossary_file=None):
     """Create or reuse a DeepL glossary from the patristic glossary dict.
 
     Returns the glossary ID, or None if the glossary is unavailable.
     ponytail: caches the glossary ID on the translator object to avoid
     re-creating it on every call. DeepL glossaries persist server-side.
     """
-    cache_key = f"_patristic_glossary_id_{source_lang}_{target_lang}"
+    cache_key = f"_patristic_glossary_id_{source_lang}_{target_lang}_{glossary_file or 'builtin'}"
     cached = getattr(translator, cache_key, None)
     if cached:
         return cached
 
     try:
-        from wenbi.patristic_glossary import get_glossary_for_deepl
+        if glossary_file:
+            import json
 
-        pairs = get_glossary_for_deepl()
-        if not pairs:
+            with open(glossary_file, encoding="utf-8") as f:
+                entries = dict(json.load(f))
+        else:
+            from wenbi.patristic_glossary import get_glossary_for_deepl
+
+            pairs = get_glossary_for_deepl()
+            entries = dict(pairs[:1000])
+        if not entries:
             return None
 
         # DeepL Python API takes entries as a dict, max 1000 term pairs
-        entries = dict(pairs[:1000])
+        entries = dict(list(entries.items())[:1000])
+        name = "user-en-zh" if glossary_file else "patristic-en-zh"
         glossary = translator.create_glossary(
-            name="patristic-en-zh",
+            name=name,
             source_lang=source_lang,
             target_lang=target_lang,
             entries=entries,
@@ -138,19 +146,20 @@ def _get_patristic_glossary_id(translator, source_lang="EN", target_lang="ZH"):
         return glossary.glossary_id
     except Exception as e:
         logger = logging.getLogger(__name__)
-        logger.debug(f"Failed to create patristic glossary: {e}")
+        logger.debug(f"Failed to create glossary: {e}")
         return None
 
 
 def translate_with_deepl(
     translator, chunk, target_language, verbose=False, max_retries=2,
-    use_glossary=False
+    use_glossary=False, glossary_file=None,
 ):
     """Translate a single chunk using DeepL.
 
     When use_glossary=True, creates a DeepL glossary from the patristic
-    terminology dict and passes it to translate_text for domain-specific
-    term overrides.
+    terminology dict (or a user-supplied glossary_file JSON) and passes it to
+    translate_text for domain-specific term overrides. Silently no-ops when the
+    target language is not Chinese (deepl_code != "ZH").
     """
     logger = logging.getLogger(__name__)
 
@@ -166,7 +175,7 @@ def translate_with_deepl(
 
     glossary_id = None
     if use_glossary and deepl_code == "ZH":
-        glossary_id = _get_patristic_glossary_id(translator)
+        glossary_id = _get_patristic_glossary_id(translator, glossary_file=glossary_file)
 
     for attempt in range(max_retries):
         try:

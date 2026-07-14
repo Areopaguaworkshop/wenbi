@@ -14,10 +14,39 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from wenbi.asr import (
+    normalize_gladia_utterances,
+    prepare_gladia_upload_audio,
+    gladia_upload_mime_type,
+    transcribe_with_gladia,
+    transcribe_with_sensevoice,
+    transcribe_with_whisper_chunks,
+)
 from wenbi.utils import download_audio, extract_audio_segment, is_text_file, parse_timestamp
 
 
 logger = logging.getLogger(__name__)
+
+
+def _load_glossary_text(glossary_file: str | None) -> str:
+    """Load glossary as 'english: chinese\\n' lines for the LLM prompt.
+
+    Uses a user-supplied JSON file ({english: chinese}) when provided, else
+    falls back to the built-in patristic glossary. Returns "" if unavailable.
+    """
+    import json as _json
+
+    try:
+        if glossary_file:
+            with open(glossary_file, encoding="utf-8") as f:
+                pairs = _json.load(f)
+            return "\n".join(f"{en}: {zh}" for en, zh in pairs.items())
+        from wenbi.patristic_glossary import get_glossary_for_dspy
+
+        return get_glossary_for_dspy()
+    except Exception as e:
+        logger.debug(f"glossary load failed: {e}")
+        return ""
 
 
 @dataclass
@@ -186,12 +215,14 @@ def write_bilingual_markdown(
 def translate_chunks(
     chunks: list[str],
     target_language: str = "Chinese",
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     max_tokens: int = 64000,
     timeout: int = 3600,
     temperature: float = 0.1,
     deepl_key: str | None = None,
     use_deepl: bool = True,
+    use_glossary: bool = True,
+    glossary_file: str | None = None,
     verbose: bool = False,
 ) -> list[str]:
     """Translate chunks using DeepL first, with the existing LLM stack as fallback."""
@@ -210,13 +241,18 @@ def translate_chunks(
 
     translate_module = None
 
+    # Determine glossary text for the LLM path (only for Chinese target).
+    glossary_text = ""
+    if use_glossary and (target_language or "").lower() in ("chinese", "zh"):
+        glossary_text = _load_glossary_text(glossary_file)
+
     def translate_with_llm(text: str) -> str:
         nonlocal translate_module
         if translate_module is None:
             from wenbi.model import _import_dspy, configure_lm
 
             configure_lm(
-                llm or "ollama/qwen3.5:cloud",
+                llm or "ollama/glm-5.2:cloud",
                 verbose=verbose,
                 max_tokens=max_tokens,
                 timeout=timeout,
@@ -229,12 +265,14 @@ def translate_chunks(
 
                 text_to_translate = dspy.InputField(desc="Text content to translate")
                 target_language = dspy.InputField(desc="Target language")
+                glossary = dspy.InputField(desc="Optional term glossary; honor it for consistency", required=False)
                 translated_text = dspy.OutputField(desc="Translated text")
 
             translate_module = dspy.Predict(TranslateSignature)
-        return translate_module(
-            text_to_translate=text, target_language=target_language
-        ).translated_text
+        kwargs = {"text_to_translate": text, "target_language": target_language}
+        if glossary_text:
+            kwargs["glossary"] = glossary_text
+        return translate_module(**kwargs).translated_text
 
     translations: list[str] = []
     for index, chunk in enumerate(chunks, 1):
@@ -244,7 +282,8 @@ def translate_chunks(
                 from wenbi.llm.deepl import translate_with_deepl
 
                 translated_text = translate_with_deepl(
-                    deepl_translator, chunk, target_language, verbose=verbose
+                    deepl_translator, chunk, target_language, verbose=verbose,
+                    use_glossary=use_glossary, glossary_file=glossary_file,
                 )
                 if verbose:
                     logger.debug(f"Translated chunk {index} with DeepL")
@@ -268,7 +307,7 @@ def translate_chunks(
 
 def group_into_topics(
     segments: list[dict[str, Any]],
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     max_tokens: int = 64000,
     timeout: int = 3600,
     temperature: float = 0.1,
@@ -327,7 +366,7 @@ def group_into_topics(
 
 def rewrite_english(
     paragraphs: list[str],
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     max_tokens: int = 64000,
     timeout: int = 3600,
     temperature: float = 0.1,
@@ -409,7 +448,7 @@ def format_speaker_turns_for_rewrite(
 
 def rewrite_chinese_interview(
     speaker_chunks: list[str],
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     expected_speakers: int = 2,
     max_tokens: int = 64000,
     timeout: int = 3600,
@@ -420,7 +459,7 @@ def rewrite_chinese_interview(
     from wenbi.model import _import_dspy, configure_lm
 
     configure_lm(
-        llm or "ollama/qwen3.5:cloud",
+        llm or "ollama/glm-5.2:cloud",
         verbose=verbose,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -463,7 +502,7 @@ def rewrite_chinese_interview(
 
 def rewrite_english_interview(
     speaker_chunks: list[str],
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     expected_speakers: int = 2,
     max_tokens: int = 64000,
     timeout: int = 3600,
@@ -474,7 +513,7 @@ def rewrite_english_interview(
     from wenbi.model import _import_dspy, configure_lm
 
     configure_lm(
-        llm or "ollama/qwen3.5:cloud",
+        llm or "ollama/glm-5.2:cloud",
         verbose=verbose,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -521,349 +560,6 @@ def write_gladia_vtt(raw_result: dict[str, Any], output_path: str) -> None:
     write_vtt(segments, output_path)
 
 
-def normalize_gladia_utterances(response: dict[str, Any]) -> list[dict[str, Any]]:
-    """Convert a Gladia pre-recorded result into normalized segments."""
-    transcription = (response.get("result") or {}).get("transcription") or {}
-    segments: list[dict[str, Any]] = []
-    for utterance in transcription.get("utterances") or []:
-        language = utterance.get("language") or likely_language_from_text(
-            utterance.get("text") or ""
-        )
-        speaker = utterance.get("speaker")
-        segments.append(
-            {
-                "start": float(utterance.get("start") or 0),
-                "end": float(utterance.get("end") or 0),
-                "text": str(utterance.get("text") or "").strip(),
-                "language": language,
-                "language_confidence": utterance.get("language_confidence"),
-                "speaker": f"Speaker {speaker}" if speaker is not None else None,
-                "confidence": utterance.get("confidence"),
-                "provider": "gladia",
-                "words": utterance.get("words") or [],
-            }
-        )
-    return segments
-
-
-def gladia_upload_mime_type(audio_path: str) -> str:
-    """Return a reasonable upload MIME type for Gladia-supported audio files."""
-    extension = os.path.splitext(audio_path)[1].lower()
-    if extension == ".m4a":
-        return "audio/m4a"
-    if extension == ".mp3":
-        return "audio/mpeg"
-    if extension == ".ogg":
-        return "application/ogg"
-    if extension == ".opus":
-        return "audio/opus"
-    if extension == ".flac":
-        return "audio/flac"
-    return "audio/wav"
-
-
-def prepare_gladia_upload_audio(audio_path: str, verbose: bool = False) -> str:
-    """Compress large WAV uploads to m4a to avoid fragile huge multipart uploads."""
-    if not audio_path.lower().endswith(".wav"):
-        return audio_path
-
-    threshold_mb = int(os.getenv("WENBI_GLADIA_COMPRESS_UPLOAD_MB", "50"))
-    threshold_bytes = threshold_mb * 1024 * 1024
-    if os.path.getsize(audio_path) < threshold_bytes:
-        return audio_path
-
-    output_path = f"{os.path.splitext(audio_path)[0]}_gladia_upload.m4a"
-    if (
-        os.path.exists(output_path)
-        and os.path.getmtime(output_path) >= os.path.getmtime(audio_path)
-        and os.path.getsize(output_path) > 0
-    ):
-        if verbose:
-            logger.debug("Using existing compressed Gladia upload: %s", output_path)
-        return output_path
-
-    if verbose:
-        logger.debug("Compressing Gladia upload to m4a: %s", output_path)
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        audio_path,
-        "-vn",
-        "-acodec",
-        "aac",
-        "-b:a",
-        "64k",
-        "-ar",
-        "16000",
-        "-ac",
-        "1",
-        output_path,
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode != 0:
-        stderr_output = result.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(
-            "ffmpeg failed while compressing Gladia upload: "
-            f"{stderr_output[-500:]}"
-        )
-    return output_path
-
-
-def transcribe_with_gladia(
-    audio_path: str,
-    api_key: str,
-    source_lang: str = "en",
-    interpreter_lang: str = "zh",
-    speaker_labels: bool = True,
-    save_raw_json: str | None = None,
-    timeout_seconds: int = 1800,
-    poll_interval: float = 5.0,
-    upload_timeout_seconds: int | None = None,
-    upload_retries: int | None = None,
-    verbose: bool = False,
-    code_switching: bool = True,
-    speaker_count: int | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Transcribe with Gladia pre-recorded.
-
-    When code_switching=True, enables bilingual code-switching mode (original
-    behaviour for en-zh).  When code_switching=False, sends a single-language
-    config which is appropriate for mono-lingual multi-speaker audio.
-    """
-    import requests
-
-    def positive_int_from_env(name: str, default: int) -> int:
-        raw_value = os.getenv(name)
-        if raw_value is None:
-            return default
-        try:
-            value = int(raw_value)
-        except ValueError:
-            logger.warning(
-                "Ignoring invalid %s=%r; using %d", name, raw_value, default
-            )
-            return default
-        if value <= 0:
-            logger.warning(
-                "Ignoring non-positive %s=%r; using %d", name, raw_value, default
-            )
-            return default
-        return value
-
-    def raise_for_gladia_error(response: requests.Response) -> None:
-        if response.ok:
-            return
-        body = response.text[:1000]
-        raise RuntimeError(
-            f"Gladia API error {response.status_code} for {response.url}: {body}"
-        )
-
-    headers = {"x-gladia-key": api_key}
-    if verbose:
-        logger.debug("Uploading audio to Gladia")
-    upload_audio_path = prepare_gladia_upload_audio(audio_path, verbose=verbose)
-    upload_mime_type = gladia_upload_mime_type(upload_audio_path)
-    effective_upload_timeout = upload_timeout_seconds or positive_int_from_env(
-        "WENBI_GLADIA_UPLOAD_TIMEOUT_SECONDS", 900
-    )
-    effective_upload_retries = upload_retries or positive_int_from_env(
-        "WENBI_GLADIA_UPLOAD_RETRIES", 3
-    )
-    upload_response: requests.Response | None = None
-    for attempt in range(1, effective_upload_retries + 1):
-        try:
-            with open(upload_audio_path, "rb") as audio_file:
-                upload_response = requests.post(
-                    "https://api.gladia.io/v2/upload",
-                    headers=headers,
-                    files={
-                        "audio": (
-                            os.path.basename(upload_audio_path),
-                            audio_file,
-                            upload_mime_type,
-                        )
-                    },
-                    timeout=effective_upload_timeout,
-                )
-            break
-        except (
-            requests.exceptions.ConnectionError,
-            requests.exceptions.Timeout,
-        ) as exc:
-            if attempt >= effective_upload_retries:
-                raise RuntimeError(
-                    "Gladia upload failed after "
-                    f"{effective_upload_retries} attempts: {exc}"
-                ) from exc
-            if verbose:
-                logger.warning(
-                    "Gladia upload attempt %d/%d failed: %s",
-                    attempt,
-                    effective_upload_retries,
-                    exc,
-                )
-            time.sleep(min(2 ** (attempt - 1), 10))
-    if upload_response is None:
-        raise RuntimeError("Gladia upload did not return a response")
-    raise_for_gladia_error(upload_response)
-    audio_url = upload_response.json()["audio_url"]
-
-    if code_switching:
-        payload: dict[str, Any] = {
-            "audio_url": audio_url,
-            "language_config": {
-                "languages": [source_lang, interpreter_lang],
-                "code_switching": True,
-            },
-            "sentences": True,
-        }
-    else:
-        payload: dict[str, Any] = {
-            "audio_url": audio_url,
-            "language_config": {
-                "languages": [source_lang],
-            },
-            "sentences": True,
-        }
-    if speaker_labels:
-        payload["diarization"] = True
-        if speaker_count:
-            payload["diarization_config"] = {
-                "min_speakers": speaker_count,
-                "max_speakers": speaker_count,
-            }
-        else:
-            payload["diarization_config"] = {"min_speakers": 1, "max_speakers": 6}
-
-    if verbose:
-        logger.debug("Creating Gladia transcription job")
-    job_response = requests.post(
-        "https://api.gladia.io/v2/pre-recorded",
-        headers={**headers, "Content-Type": "application/json"},
-        json=payload,
-        timeout=60,
-    )
-    raise_for_gladia_error(job_response)
-    job = job_response.json()
-    result_url = job.get("result_url") or f"https://api.gladia.io/v2/pre-recorded/{job['id']}"
-
-    deadline = time.time() + timeout_seconds
-    result: dict[str, Any] = {}
-    while time.time() < deadline:
-        poll_response = requests.get(result_url, headers=headers, timeout=60)
-        raise_for_gladia_error(poll_response)
-        result = poll_response.json()
-        status = result.get("status")
-        if verbose:
-            logger.debug(f"Gladia job status: {status}")
-        if status == "done":
-            break
-        if status in {"error", "failed"}:
-            raise RuntimeError(f"Gladia transcription failed: {result}")
-        time.sleep(poll_interval)
-    else:
-        raise TimeoutError("Timed out waiting for Gladia transcription")
-
-    if save_raw_json:
-        with open(save_raw_json, "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-    return normalize_gladia_utterances(result), result
-
-
-def transcribe_with_sensevoice(
-    audio_path: str,
-    speaker_labels: bool = True,
-    verbose: bool = False,
-) -> list[dict[str, Any]]:
-    """Transcribe with local FunASR SenseVoiceSmall."""
-    from funasr import AutoModel
-
-    model_kwargs: dict[str, Any] = {
-        "model": "iic/SenseVoiceSmall",
-        "vad_model": "fsmn-vad",
-        "vad_kwargs": {"max_single_segment_time": 30000},
-        "trust_remote_code": True,
-        "device": "cpu",
-    }
-    if speaker_labels:
-        model_kwargs["spk_model"] = "cam++"
-        model_kwargs["punc_model"] = "ct-punc"
-
-    if verbose:
-        logger.debug(f"Loading SenseVoice with options: {model_kwargs}")
-    model = AutoModel(**model_kwargs)
-    result_list = model.generate(
-        input=audio_path,
-        cache={},
-        language="auto",
-        use_itn=True,
-        batch_size_s=60,
-        merge_vad=True,
-        merge_length_s=15,
-    )
-    result = result_list[0] if isinstance(result_list, list) else result_list
-    sentence_info = result.get("sentence_info") if isinstance(result, dict) else None
-
-    rows = sentence_info or []
-    if not rows and isinstance(result, dict) and result.get("text"):
-        rows = [{"start": 0, "end": 0, "text": result["text"]}]
-
-    segments: list[dict[str, Any]] = []
-    for row in rows:
-        text = str(row.get("text") or "").strip()
-        language = row.get("language") or likely_language_from_text(text)
-        speaker = row.get("spk")
-        start = float(row.get("start") or 0)
-        end = float(row.get("end") or 0)
-        if start > 1000:
-            start /= 1000
-        if end > 1000:
-            end /= 1000
-        segments.append(
-            {
-                "start": start,
-                "end": end,
-                "text": text,
-                "language": language,
-                "language_confidence": row.get("language_confidence"),
-                "speaker": f"Speaker {speaker}" if speaker is not None else None,
-                "confidence": row.get("confidence"),
-                "provider": "sensevoice",
-            }
-        )
-    return segments
-
-
-def transcribe_with_whisper_chunks(
-    audio_path: str,
-    model_size: str = "large-v3-turbo",
-    verbose: bool = False,
-) -> list[dict[str, Any]]:
-    """Fallback Whisper transcription with text-based language tagging."""
-    import whisper
-
-    model = whisper.load_model(model_size, device="cpu")
-    result = model.transcribe(audio_path, fp16=False, verbose=verbose)
-    segments: list[dict[str, Any]] = []
-    for row in result.get("segments") or []:
-        text = str(row.get("text") or "").strip()
-        segments.append(
-            {
-                "start": float(row.get("start") or 0),
-                "end": float(row.get("end") or 0),
-                "text": text,
-                "language": likely_language_from_text(text),
-                "language_confidence": None,
-                "speaker": None,
-                "confidence": None,
-                "provider": "whisper",
-            }
-        )
-    return segments
-
-
 def prepare_audio(
     input_path: str,
     output_dir: str,
@@ -905,7 +601,7 @@ def process_en_zh(
     source_lang: str = "en",
     interpreter_lang: str = "zh",
     target_language: str = "Chinese",
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     chunk_length: int = 20,
     max_tokens: int = 64000,
     timeout: int = 3600,
@@ -915,6 +611,8 @@ def process_en_zh(
     speaker_labels: bool = True,
     save_json: bool = False,
     verbose: bool = False,
+    use_glossary: bool = True,
+    glossary_file: str | None = None,
 ) -> EnZhResult:
     """Run the full English-source to Chinese bilingual workflow."""
     if not input_path:
@@ -947,7 +645,7 @@ def process_en_zh(
         if gladia_key or os.getenv("GLADIA_API_KEY"):
             provider = "gladia"
         else:
-            provider = "sensevoice"
+            provider = "funasr"
 
     if provider == "gladia":
         key = gladia_key or os.getenv("GLADIA_API_KEY")
@@ -962,14 +660,14 @@ def process_en_zh(
             save_raw_json=raw_json_path,
             verbose=verbose,
         )
-    elif provider == "sensevoice":
+    elif provider == "funasr":
         try:
             segments = transcribe_with_sensevoice(
                 audio_path, speaker_labels=speaker_labels, verbose=verbose
             )
         except Exception as e:
             if asr_provider == "auto":
-                logger.warning(f"SenseVoice failed ({e}), falling back to Whisper")
+                logger.warning(f"FunASR failed ({e}), falling back to Whisper")
                 provider = "whisper"
                 segments = transcribe_with_whisper_chunks(
                     audio_path, model_size=transcribe_model, verbose=verbose
@@ -1008,7 +706,7 @@ def process_en_zh(
     # 2. Group merged segments into topic paragraphs via LLM
     topic_paragraphs = group_into_topics(
         merged,
-        llm=llm or "ollama/qwen3.5:cloud",
+        llm=llm or "ollama/glm-5.2:cloud",
         max_tokens=max_tokens,
         timeout=timeout,
         temperature=temperature,
@@ -1020,7 +718,7 @@ def process_en_zh(
     # 3. Rewrite English: remove oral fillers, conservative cleanup
     rewritten_paragraphs = rewrite_english(
         topic_paragraphs,
-        llm=llm or "ollama/qwen3.5:cloud",
+        llm=llm or "ollama/glm-5.2:cloud",
         max_tokens=max_tokens,
         timeout=timeout,
         temperature=temperature,
@@ -1035,11 +733,13 @@ def process_en_zh(
     translations = translate_chunks(
         rewritten_paragraphs,
         target_language=target_language,
-        llm=llm or "ollama/qwen3.5:cloud",
+        llm=llm or "ollama/glm-5.2:cloud",
         max_tokens=max_tokens,
         timeout=timeout,
         temperature=temperature,
         deepl_key=deepl_key,
+        use_glossary=use_glossary,
+        glossary_file=glossary_file,
         verbose=verbose,
     )
 
@@ -1151,7 +851,7 @@ def process_speaker(
     transcribe_model: str = "large-v3-turbo",
     source_lang: str = "en",
     target_language: str = "Chinese",
-    llm: str = "ollama/qwen3.5:cloud",
+    llm: str = "ollama/glm-5.2:cloud",
     chunk_length: int = 20,
     max_tokens: int = 64000,
     timeout: int = 3600,
@@ -1163,6 +863,8 @@ def process_speaker(
     rewrite_mode: str = "english",
     save_json: bool = False,
     verbose: bool = False,
+    use_glossary: bool = True,
+    glossary_file: str | None = None,
 ) -> SpeakerResult:
     """Run the full speaker-aware single-language workflow.
 
@@ -1228,7 +930,7 @@ def process_speaker(
             if gladia_key or os.getenv("GLADIA_API_KEY"):
                 provider = "gladia"
             else:
-                provider = "sensevoice"
+                provider = "funasr"
 
         if provider == "gladia":
             key = gladia_key or os.getenv("GLADIA_API_KEY")
@@ -1245,14 +947,14 @@ def process_speaker(
                 verbose=verbose,
                 code_switching=False,
             )
-        elif provider == "sensevoice":
+        elif provider == "funasr":
             try:
                 segments = transcribe_with_sensevoice(
                     audio_path, speaker_labels=speaker_labels, verbose=verbose
                 )
             except Exception as e:
                 if asr_provider == "auto":
-                    logger.warning(f"SenseVoice failed ({e}), falling back to Whisper")
+                    logger.warning(f"FunASR failed ({e}), falling back to Whisper")
                     provider = "whisper"
                     segments = transcribe_with_whisper_chunks(
                         audio_path, model_size=transcribe_model, verbose=verbose
@@ -1301,7 +1003,7 @@ def process_speaker(
             logger.debug("Prepared %d speaker-labeled Chinese chunks", len(speaker_chunks))
         rewritten_paragraphs = rewrite_chinese_interview(
             speaker_chunks,
-            llm=llm or "ollama/qwen3.5:cloud",
+            llm=llm or "ollama/glm-5.2:cloud",
             expected_speakers=speaker_count or num_speakers or 2,
             max_tokens=max_tokens,
             timeout=timeout,
@@ -1314,7 +1016,7 @@ def process_speaker(
             logger.debug("Prepared %d speaker-labeled English chunks", len(speaker_chunks))
         rewritten_paragraphs = rewrite_english_interview(
             speaker_chunks,
-            llm=llm or "ollama/qwen3.5:cloud",
+            llm=llm or "ollama/glm-5.2:cloud",
             expected_speakers=speaker_count or num_speakers or 2,
             max_tokens=max_tokens,
             timeout=timeout,
@@ -1325,7 +1027,7 @@ def process_speaker(
         # 2. Group merged segments into topic paragraphs via LLM
         topic_paragraphs = group_into_topics(
             merged,
-            llm=llm or "ollama/qwen3.5:cloud",
+            llm=llm or "ollama/glm-5.2:cloud",
             max_tokens=max_tokens,
             timeout=timeout,
             temperature=temperature,
@@ -1337,7 +1039,7 @@ def process_speaker(
         # 3. Rewrite English: remove oral fillers, conservative cleanup
         rewritten_paragraphs = rewrite_english(
             topic_paragraphs,
-            llm=llm or "ollama/qwen3.5:cloud",
+            llm=llm or "ollama/glm-5.2:cloud",
             max_tokens=max_tokens,
             timeout=timeout,
             temperature=temperature,
@@ -1361,11 +1063,13 @@ def process_speaker(
         translations = translate_chunks(
             rewritten_paragraphs,
             target_language=target_language,
-            llm=llm or "ollama/qwen3.5:cloud",
+            llm=llm or "ollama/glm-5.2:cloud",
             max_tokens=max_tokens,
             timeout=timeout,
             temperature=temperature,
             deepl_key=deepl_key,
+            use_glossary=use_glossary,
+            glossary_file=glossary_file,
             verbose=verbose,
         )
         bilingual_md_path = os.path.join(out_dir, f"{base_name}{suffix}_{source_lower}_zh.md")

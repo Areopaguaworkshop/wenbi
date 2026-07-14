@@ -28,7 +28,7 @@ def configure_lm(model_string, verbose=False, **kwargs):
     dspy = _import_dspy()
 
     if not model_string:
-        model_string = "ollama/qwen3.5:cloud"
+        model_string = "ollama/glm-5.2:cloud"
 
     if verbose:
         logger.debug(f"Configuring LLM: {model_string}")
@@ -115,7 +115,7 @@ def translate(
     input_file,
     output_dir="",
     translate_language="Chinese",
-    llm="ollama/qwen3.5:cloud",
+    llm="ollama/glm-5.2:cloud",
     chunk_length=20,
     max_tokens=50000,
     timeout=3600,
@@ -125,6 +125,8 @@ def translate(
     use_deepl=True,
     deepl_key=None,
     keep_original_lang=False,
+    use_glossary=True,
+    glossary_file=None,
 ):
     """
     Translate text content using DeepL (primary) with LLM fallback.
@@ -133,6 +135,10 @@ def translate(
         use_deepl: Always True - DeepL API is always attempted first
         deepl_key: Optional DeepL API key (uses DEEPL_API_KEY env var if not provided)
         keep_original_lang: If True, output both original and translated text side-by-side
+        use_glossary: If True (default), apply EN→ZH glossary for term consistency.
+            No-op when target language is not Chinese.
+        glossary_file: Optional path to a user glossary JSON ({english: chinese}).
+            Overrides the built-in patristic glossary.
     """
     logger = logging.getLogger(__name__)
 
@@ -167,6 +173,26 @@ def translate(
                 logger.debug(f"Failed to initialize DeepL: {e}")
             deepl_available = False
 
+    # Glossary text for the LLM fallback path (only for Chinese target).
+    _is_chinese_target = (translate_language or "").lower() in ("chinese", "zh")
+    glossary_text = ""
+    if use_glossary and _is_chinese_target:
+        try:
+            if glossary_file:
+                import json
+
+                with open(glossary_file, encoding="utf-8") as f:
+                    pairs = json.load(f)
+                glossary_text = "\n".join(f"{en}: {zh}" for en, zh in pairs.items())
+            else:
+                from wenbi.patristic_glossary import get_glossary_for_dspy
+
+                glossary_text = get_glossary_for_dspy()
+        except Exception as e:
+            if verbose:
+                logger.debug(f"Glossary load failed: {e}")
+            glossary_text = ""
+
     # Configure LLM lazily: only initialize if DeepL fails for a chunk.
     translate_module = None
     llm_init_error = None
@@ -196,6 +222,7 @@ def translate(
 
             text_to_translate = dspy.InputField(desc="Text content to be translated")
             target_language = dspy.InputField(desc="Target language for translation")
+            glossary = dspy.InputField(desc="Optional term glossary; honor it for consistency", required=False)
             translated_text = dspy.OutputField(
                 desc="Translated text in the target language"
             )
@@ -253,7 +280,8 @@ def translate(
                         from wenbi.llm.deepl import translate_with_deepl
 
                         translated_text = translate_with_deepl(
-                            deepl_translator, chunk, translate_language, verbose=verbose
+                            deepl_translator, chunk, translate_language, verbose=verbose,
+                            use_glossary=use_glossary, glossary_file=glossary_file,
                         )
                         deepl_count += 1
                         if verbose:
@@ -269,9 +297,13 @@ def translate(
                 if translated_text is None:
                     try:
                         translate_module = get_translate_module()
-                        result = translate_module(
-                            text_to_translate=chunk, target_language=translate_language
-                        )
+                        llm_kwargs = {
+                            "text_to_translate": chunk,
+                            "target_language": translate_language,
+                        }
+                        if glossary_text:
+                            llm_kwargs["glossary"] = glossary_text
+                        result = translate_module(**llm_kwargs)
                         translated_text = result.translated_text
                         llm_count += 1
                         if verbose:
@@ -312,7 +344,7 @@ def translate(
 def rewrite(
     input_file,
     output_dir="",
-    llm="ollama/qwen3.5:cloud",
+    llm="ollama/glm-5.2:cloud",
     rewrite_language="Chinese",
     chunk_length=20,
     max_tokens=50000,
@@ -487,7 +519,7 @@ def rewrite(
 def academic(
     input_file,
     output_dir="",
-    llm="ollama/qwen3.5:cloud",
+    llm="ollama/glm-5.2:cloud",
     academic_lang="English",
     chunk_length=20,
     max_tokens=50000,
@@ -876,7 +908,7 @@ def convert_single_slide_image(
 def combine_speech_and_slides_enhanced(
     speech_markdown,
     slides_markdown,
-    llm="ollama/qwen3.5:cloud",
+    llm="ollama/glm-5.2:cloud",
     output_dir="",
     cite_timestamps=False,
     max_tokens=50000,

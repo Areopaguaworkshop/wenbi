@@ -53,7 +53,7 @@ def process_input(
     max_tokens=50000,
     timeout=3600,
     temperature=0.1,
-    transcribe_model="large-v3",
+    asr_provider="auto",
     timestamp=None,
     output_wav="",
     subcommand=None,  # New parameter to specify which subcommand to use
@@ -63,6 +63,8 @@ def process_input(
     deepl_key=None,  # DeepL API key
     keep_original_lang=False,  # Keep original language alongside translation
     enable_speakers=False,  # Enable speaker diarization via FunASR cam++
+    use_glossary=True,  # Apply EN→ZH glossary for term consistency
+    glossary_file=None,  # Optional user glossary JSON path
 ):
     """Process input with logic:
     1. If input is video/audio/URL: convert to WAV -> transcribe to VTT -> process with subcommand
@@ -76,7 +78,7 @@ def process_input(
         logger.debug(f"Input URL: {url}")
         logger.debug(f"Subcommand: {subcommand}")
         logger.debug(f"LLM: {llm}")
-        logger.debug(f"Transcribe model: {transcribe_model}")
+        logger.debug(f"ASR provider: {asr_provider}")
         logger.debug(f"Target language: {lang}")
         logger.debug(f"Enable speakers: {enable_speakers}")
     # Use current directory for CLI, package directory for web interface
@@ -146,15 +148,14 @@ def process_input(
             logger.debug("Step 2: Transcribing to VTT...")
         try:
             if multi_language:
-                if verbose:
-                    logger.debug("Using multi-language transcription")
+                # ponytail: mutilang still uses whisper directly, out of scope
                 from wenbi.mutilang import speaker_vtt, transcribe_multi_speaker
 
                 base_name = os.path.splitext(os.path.basename(file_path))[0]
                 if verbose:
                     logger.debug(f"Running multi-speaker transcription on {base_name}")
                 transcriptions = transcribe_multi_speaker(
-                    file_path, model_size=transcribe_model
+                    file_path, model_size="large-v3-turbo"
                 )
                 if verbose:
                     logger.debug(f"Transcriptions: {len(transcriptions)} speakers")
@@ -166,7 +167,7 @@ def process_input(
             else:
                 if verbose:
                     logger.debug(
-                        f"Running single-language transcription (model: {transcribe_model})"
+                        f"Running single-language transcription (provider: {asr_provider})"
                     )
                 lang_code = transcribe_lang if transcribe_lang.strip() else None
                 if verbose and lang_code:
@@ -175,7 +176,7 @@ def process_input(
                     file_path,
                     language=lang_code,
                     output_dir=out_dir,
-                    model_size=transcribe_model,
+                    asr_provider=asr_provider,
                     enable_speakers=enable_speakers,
                 )
                 if verbose:
@@ -215,6 +216,8 @@ def process_input(
                             use_deepl=use_deepl,
                             deepl_key=deepl_key,
                             keep_original_lang=keep_original_lang,
+                            use_glossary=use_glossary,
+                            glossary_file=glossary_file,
                             verbose=verbose,
                         )
                         # Save to output file
@@ -344,6 +347,8 @@ def process_input(
                         use_deepl=use_deepl,
                         deepl_key=deepl_key,
                         keep_original_lang=keep_original_lang,
+                        use_glossary=use_glossary,
+                        glossary_file=glossary_file,
                         verbose=verbose,
                     )
                     # Save to output file

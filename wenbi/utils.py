@@ -116,7 +116,7 @@ def parse_subtitle(file_path, vtt_file=None, verbose=False):
     return result_df
 
 
-def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", verbose=False, enable_speakers=False):
+def transcribe(file_path, language=None, output_dir=None, asr_provider="auto", verbose=False, enable_speakers=False):
     """
     Transcribes an audio file to a WebVTT file with proper timestamps.
 
@@ -124,23 +124,23 @@ def transcribe(file_path, language=None, output_dir=None, model_size="1.7B", ver
         file_path (str): Path to the audio file
         language (str, optional): Language code for transcription
         output_dir (str, optional): Directory to save the VTT file
-        model_size (str, optional): FunASR model name (e.g., paraformer-zh) or whisper size (tiny, base, small, medium, large-v1, large-v2, large-v3)
+        asr_provider (str): ASR backend — auto|gladia|funasr|whisper (default: auto)
         verbose (bool): Enable verbose logging
         enable_speakers (bool): Enable speaker diarization (FunASR cam++ only)
     """
     from wenbi.asr import transcribe_with_engine
-    
+
     logger = logging.getLogger(__name__)
-    
+
     if verbose:
         logger.debug(f"Starting transcription of: {file_path}")
-        logger.debug(f"Model size: {model_size}")
+        logger.debug(f"ASR provider: {asr_provider}")
         logger.debug(f"Language: {language or 'auto-detect'}")
         logger.debug(f"Enable speakers: {enable_speakers}")
-    
+
     result = transcribe_with_engine(
         audio_path=file_path,
-        model_size=model_size,
+        asr_provider=asr_provider,
         language=language,
         verbose=verbose,
         enable_speakers=enable_speakers,
@@ -578,6 +578,41 @@ def _sanitize_filename(filename):
     return sanitized[:100]
 
 
+def _yt_dlp_js_runtime_args():
+    """Return yt-dlp args that work around YouTube's player-client restrictions.
+
+    YouTube periodically breaks yt-dlp's default clients. Two regimes:
+    - yt-dlp >= 2026: supports --js-runtimes; needs node/deno for the n-challenge.
+    - yt-dlp 2025.x: --js-runtimes doesn't exist; the android player_client
+      still works without a PO token (format 18 / 360p mp4 with audio).
+
+    Returns a list of args to splice in front of the yt-dlp subcommand.
+    ponytail: version-gated, probes the venv yt-dlp once per process; the
+    android-client fallback is a known ceiling — if YouTube kills android
+    too, the upgrade path is bumping yt-dlp in pyproject.toml.
+    """
+    import shutil
+    import subprocess
+
+    try:
+        version_out = subprocess.run(
+            ["yt-dlp", "--version"], capture_output=True, text=True, timeout=10
+        )
+        version = (version_out.stdout or "").strip()
+    except Exception:
+        version = ""
+
+    # 2026+ supports --js-runtimes; prefer node, then deno.
+    if version >= "2026":
+        for runtime in ("node", "deno"):
+            path = shutil.which(runtime)
+            if path:
+                return ["--js-runtimes", f"{runtime}:{path}"]
+        return []
+    # 2025.x: force the android client which still serves format 18.
+    return ["--extractor-args", "youtube:player_client=android"]
+
+
 def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbose=False):
     """
     Downloads audio from a URL using yt-dlp and converts it to WAV format.
@@ -605,6 +640,11 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
     try:
         # Get video title using yt-dlp
         get_title_cmd = ["yt-dlp", "--get-title", "--no-warnings", url]
+        # ponytail: YouTube n-challenge requires a real JS runtime since yt-dlp 2025;
+        # deno-only default fails on SABR-protected videos. Probe node first.
+        _js_args = _yt_dlp_js_runtime_args()
+        if _js_args:
+            get_title_cmd[1:1] = _js_args
         if verbose:
             logger.debug(f"Fetching title with command: {' '.join(get_title_cmd)}")
         
@@ -626,6 +666,8 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
             "--output", f"{temp_path}.%(ext)s",
             url
         ]
+        if _js_args:
+            cmd[1:1] = _js_args
         
         if verbose:
             logger.debug(f"Running yt-dlp command: {' '.join(cmd)}")
