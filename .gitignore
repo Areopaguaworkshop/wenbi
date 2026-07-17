@@ -39,6 +39,7 @@ model/**/*
 example/**/*
 instruction/**/*
 *.wav
+*.m4a
 *.md
 !README.md
 *.pt
