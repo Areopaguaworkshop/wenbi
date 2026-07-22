@@ -24,7 +24,7 @@ def test_full_integration():
             is_deepl_available,
         )
         from wenbi.model import translate
-        from wenbi.cli import handle_translate_command, add_global_args
+        from wenbi.cli import add_slide_args, add_global_args
         from wenbi.main import process_input
         print("✓ All modules imported successfully")
     except ImportError as e:
@@ -69,17 +69,18 @@ def test_full_integration():
     import argparse
 
     parser = argparse.ArgumentParser()
-    subparser = parser.add_subparsers(dest="command").add_parser("translate")
+    subparser = parser.add_subparsers(dest="command").add_parser("speaker")
     add_global_args(subparser)
+    add_slide_args(subparser)
 
-    # Parse with DeepL options
+    # Parse with slide-combine and DeepL options
     args = subparser.parse_args(
-        ["input.txt", "--no-deepl", "--deepl-key", "test-123"]
+        ["input.txt", "--ppt", "--deepl-key", "test-123"]
     )
 
     cli_checks = [
         ("input", "input.txt"),
-        ("no_deepl", True),
+        ("ppt", ""),  # bare --ppt -> ppt="" (TYPE 1)
         ("deepl_key", "test-123"),
     ]
 
@@ -190,8 +191,8 @@ This is a test
     print("  • Configuration: Via --deepl-key or DEEPL_API_KEY env var")
     print("  • Disable DeepL: Use --no-deepl flag")
     print("\nExample usage:")
-    print("  wenbi translate input.txt --lang French --deepl-key YOUR_KEY")
-    print("  wenbi tr video.mp4 --lang Chinese --no-deepl  # LLM only")
+    print("  wenbi speaker video.mp4 --ppt --deepl-key YOUR_KEY")
+    print("  wenbi sp video.mp4 --ppt slides.pdf --lang Chinese")
 
     return True
 

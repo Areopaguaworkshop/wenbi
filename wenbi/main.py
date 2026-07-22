@@ -200,35 +200,7 @@ def process_input(
                         logger.debug(
                             f"Processing VTT for {speaker or 'default speaker'}"
                         )
-                    if subcommand == "translate":
-                        if verbose:
-                            logger.debug(f"Translating to {lang}...")
-                        translated_text = translate(
-                            vtt_file,
-                            output_dir=out_dir,
-                            translate_language=lang,
-                            llm=llm,
-                            chunk_length=chunk_length,
-                            max_tokens=max_tokens,
-                            timeout=timeout,
-                            temperature=temperature,
-                            cite_timestamps=cite_timestamps,
-                            use_deepl=use_deepl,
-                            deepl_key=deepl_key,
-                            keep_original_lang=keep_original_lang,
-                            use_glossary=use_glossary,
-                            glossary_file=glossary_file,
-                            verbose=verbose,
-                        )
-                        # Save to output file
-                        base_name = os.path.splitext(os.path.basename(vtt_file))[0]
-                        output_file = os.path.join(
-                            out_dir, f"{base_name}_translated.md"
-                        )
-                        with open(output_file, "w", encoding="utf-8") as f:
-                            f.write(translated_text)
-                        result = (translated_text, output_file)
-                    elif subcommand == "rewrite":
+                    if subcommand == "rewrite":
                         if verbose:
                             logger.debug(f"Rewriting in {lang}...")
 
@@ -333,31 +305,7 @@ def process_input(
         if subcommand:
             # Process text file directly with subcommand
             try:
-                if subcommand == "translate":
-                    translated_text = translate(
-                        file_path,
-                        output_dir=out_dir,
-                        translate_language=lang,
-                        llm=llm,
-                        chunk_length=chunk_length,
-                        max_tokens=max_tokens,
-                        timeout=timeout,
-                        temperature=temperature,
-                        cite_timestamps=cite_timestamps,
-                        use_deepl=use_deepl,
-                        deepl_key=deepl_key,
-                        keep_original_lang=keep_original_lang,
-                        use_glossary=use_glossary,
-                        glossary_file=glossary_file,
-                        verbose=verbose,
-                    )
-                    # Save to output file
-                    base_name = os.path.splitext(os.path.basename(file_path))[0]
-                    output_file = os.path.join(out_dir, f"{base_name}_translated.md")
-                    with open(output_file, "w", encoding="utf-8") as f:
-                        f.write(translated_text)
-                    result = (translated_text, output_file)
-                elif subcommand == "rewrite":
+                if subcommand == "rewrite":
                     rewrite_text, rewrite_file = rewrite(
                         file_path,
                         output_dir=out_dir,

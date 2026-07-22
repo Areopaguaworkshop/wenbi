@@ -283,209 +283,116 @@ def convert_pdf_page_to_image(pdf_path, page_idx):
             raise SystemExit(1)
 
 
-def execute_ppt_method(video_path, deduplicated_frames, ppt_path, output_dir,
-                       no_ocr, no_clean, base_name, cite_timestamps, llm,
-                       chunk_length, max_tokens, timeout, temperature, lang,
-                       transcribe_model, multi_language, transcribe_lang,
-                       logger, verbose, ssim_threshold=0.8):
+def build_slides_markdown(deduplicated_frames, ppt_path, output_dir, no_ocr,
+                           base_name, logger, verbose, ssim_threshold=0.8):
     """
-    Execute PPT method workflow with OpenCV-based PDF-to-Frame matching.
-    Returns: (combine_md_path, combine_clean_md_path)
+    Build slides markdown from deduplicated frames + optional slides file.
+    - ppt_path None/empty  -> TYPE 1: embed frames as base64 (no OCR)
+    - ppt_path <file>      -> TYPE 3: load/convert, SSIM-match PDF pages to
+                              frames, OCR each matched page (or base64 if no_ocr)
+    Returns: path to the slides markdown file.
     """
-    from wenbi.cli import (
-        run_marker_pdf_on_image, image_to_base64, clean_combined_markdown
-    )
-    from wenbi.main import process_input
+    from wenbi.cli import run_marker_pdf_on_image, image_to_base64, embed_frames_as_base64
     import tempfile
     import os
-    
+
+    # TYPE 1: frame base64-embed, no OCR
+    if not ppt_path:
+        if verbose:
+            logger.debug("TYPE 1: embedding frames as base64 (no OCR)")
+        return embed_frames_as_base64(
+            deduplicated_frames, output_dir, base_name, logger, verbose
+        )
+
+    # TYPE 3: OCR slides file, match to frames
     if verbose:
-        logger.debug("=== TYPE 3: PPT Method ===")
-        logger.debug(f"Video: {video_path}")
+        logger.debug("=== TYPE 3: PPT Method (slides file) ===")
         logger.debug(f"PPT/PDF: {ppt_path}")
-        logger.debug(f"Output dir: {output_dir}")
         logger.debug(f"Deduplicated frames count: {len(deduplicated_frames)}")
-    
-    # Check if input is an image file
+
     file_ext = os.path.splitext(ppt_path)[1].lower()
-    
+
     if file_ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
-        # Process as image input
         if verbose:
             logger.debug("Processing single image file as slide")
-        
         markdown_sections = process_images_as_slides(
-            ppt_path, deduplicated_frames, output_dir, no_ocr, base_name, cite_timestamps, logger, verbose
+            ppt_path, deduplicated_frames, output_dir, no_ocr, base_name,
+            True, logger, verbose  # cite_timestamps forced True for combine
         )
-        
         ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
         with open(ppt_md, "w", encoding="utf-8") as f:
             f.write("".join(markdown_sections))
-        
         logger.debug(f"Image processing completed: {ppt_md}")
-    else:
-        # Process as PDF/PPT input
-        logger.debug("Step 1: Loading and converting PDF/PPT file...")
-        pdf_path = load_and_convert_pdf(ppt_path, output_dir, logger, verbose)
-        logger.debug(f"Loaded PDF: {pdf_path}")
-        
-        # Step 4: Use OpenCV SSIM to match PDF pages to frames
-        logger.debug("Step 2: Matching PDF pages to video frames using OpenCV SSIM...")
-        matched_pairs = match_pdf_pages_to_frames(
-            pdf_path, 
-            deduplicated_frames, 
-            logger, 
-            verbose, 
-            ssim_threshold=ssim_threshold
-        )
-        
-        if not matched_pairs:
-            print("Error: No PDF pages matched with video frames. Check your inputs.")
-            raise SystemExit(1)
-        
-        logger.debug(f"Successfully matched {len(matched_pairs)} PDF pages to frames")
-        
-        # Step 5: OCR matched PDF pages with their timestamps
-        logger.debug("Step 3: Running OCR on matched PDF pages...")
-        
-        temp_img_dir = tempfile.mkdtemp(prefix="ppt_images_")
-        
-        try:
-            markdown_sections = []
-            
-            for pair_idx, (pdf_page_idx, frame_data) in enumerate(matched_pairs):
-                timestamp = frame_data["timestamp"]
-                
-                if verbose:
-                    logger.debug(f"Processing matched pair {pair_idx + 1}/{len(matched_pairs)}: PDF page {pdf_page_idx + 1} ↔ {timestamp}")
-                
-                try:
-                    # Convert PDF page to image
-                    page_image = convert_pdf_page_to_image(pdf_path, pdf_page_idx)
-                    
-                    # Save temp image
-                    temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{pdf_page_idx}.png")
-                    page_image.save(temp_img_path)
-                    
-                    section = f"\n### **{timestamp}**\n"
-                    
-                    if no_ocr:
-                        # Embed as base64
-                        logger.debug(f"  Embedding page {pdf_page_idx + 1} as base64 (--no-ocr)")
+        return ppt_md
+
+    # PDF/PPT input
+    logger.debug("Step 1: Loading and converting PDF/PPT file...")
+    pdf_path = load_and_convert_pdf(ppt_path, output_dir, logger, verbose)
+    logger.debug(f"Loaded PDF: {pdf_path}")
+
+    logger.debug("Step 2: Matching PDF pages to video frames using OpenCV SSIM...")
+    matched_pairs = match_pdf_pages_to_frames(
+        pdf_path, deduplicated_frames, logger, verbose,
+        ssim_threshold=ssim_threshold,
+    )
+    if not matched_pairs:
+        print("Error: No PDF pages matched with video frames. Check your inputs.")
+        raise SystemExit(1)
+    logger.debug(f"Successfully matched {len(matched_pairs)} PDF pages to frames")
+
+    logger.debug("Step 3: Running OCR on matched PDF pages...")
+    temp_img_dir = tempfile.mkdtemp(prefix="ppt_images_")
+    try:
+        markdown_sections = []
+        for pair_idx, (pdf_page_idx, frame_data) in enumerate(matched_pairs):
+            timestamp = frame_data["timestamp"]
+            if verbose:
+                logger.debug(f"Processing matched pair {pair_idx + 1}/{len(matched_pairs)}: PDF page {pdf_page_idx + 1} ↔ {timestamp}")
+            try:
+                page_image = convert_pdf_page_to_image(pdf_path, pdf_page_idx)
+                temp_img_path = os.path.join(temp_img_dir, f"pdf_page_{pdf_page_idx}.png")
+                page_image.save(temp_img_path)
+
+                section = f"\n### **{timestamp}**\n"
+                if no_ocr:
+                    logger.debug(f"  Embedding page {pdf_page_idx + 1} as base64 (--no-ocr)")
+                    b64 = image_to_base64(temp_img_path)
+                    if b64:
+                        section += f'<img src="data:image/png;base64,{b64}" />\n'
+                else:
+                    logger.debug(f"  Running marker OCR on page {pdf_page_idx + 1}...")
+                    ocr_result = run_marker_pdf_on_image(
+                        temp_img_path, output_dir, verbose, logger
+                    )
+                    if ocr_result["success"]:
+                        logger.debug(f"  OCR successful for page {pdf_page_idx + 1}")
+                        section += ocr_result["text"]
+                        for filename, b64 in ocr_result["base64_images"].items():
+                            section += f'\n<img src="data:image/png;base64,{b64}" />\n'
+                    else:
+                        logger.warning(f"  OCR failed for page {pdf_page_idx + 1}, using base64")
                         b64 = image_to_base64(temp_img_path)
                         if b64:
                             section += f'<img src="data:image/png;base64,{b64}" />\n'
-                    else:
-                        # OCR with marker
-                        logger.debug(f"  Running marker OCR on page {pdf_page_idx + 1}...")
-                        ocr_result = run_marker_pdf_on_image(
-                            temp_img_path, output_dir, verbose, logger
-                        )
-                        
-                        if ocr_result["success"]:
-                            logger.debug(f"  OCR successful for page {pdf_page_idx + 1}")
-                            section += ocr_result["text"]
-                            
-                            # Add base64 images if any
-                            for filename, b64 in ocr_result["base64_images"].items():
-                                section += f'\n<img src="data:image/png;base64,{b64}" />\n'
-                        else:
-                            # OCR failed, fallback to base64
-                            logger.warning(f"  OCR failed for page {pdf_page_idx + 1}, using base64")
-                            
-                            b64 = image_to_base64(temp_img_path)
-                            if b64:
-                                section += f'<img src="data:image/png;base64,{b64}" />\n'
-                    
-                    markdown_sections.append(section)
-                    
-                    # Clean temp image
-                    try:
-                        os.remove(temp_img_path)
-                    except:
-                        pass
-                
-                except Exception as e:
-                    logger.warning(f"Error processing page {pdf_page_idx + 1}: {e}")
-                    raise SystemExit(1)
-            
-            ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
-            with open(ppt_md, "w", encoding="utf-8") as f:
-                f.write("".join(markdown_sections))
-            
-            logger.debug(f"PDF OCR completed: {ppt_md}")
-        
-        finally:
-            # Cleanup temp directory
-            import shutil
-            try:
-                shutil.rmtree(temp_img_dir)
-            except:
-                pass
-    
-    # Step 6: Process audio
-    logger.debug("Step 4: Processing audio from video...")
-    
-    # Determine if input is URL or file path
-    is_url = video_path.startswith(("http://", "https://", "www."))
-    
-    params = {
-        "output_dir": output_dir,
-        "llm": llm,
-        "chunk_length": chunk_length,
-        "max_tokens": max_tokens,
-        "timeout": timeout,
-        "temperature": temperature,
-        "lang": lang,
-        "transcribe_model": transcribe_model,
-        "multi_language": multi_language,
-        "transcribe_lang": transcribe_lang,
-        "cite_timestamps": cite_timestamps,
-        "verbose": verbose,
-        "subcommand": "rewrite"
-    }
-    
-    logger.debug("Calling process_input for audio processing...")
-    result = process_input(
-        file_path=video_path if not is_url else None,
-        url=video_path if is_url else "",
-        **params
-    )
-    
-    audio_markdown = result[0]
-    logger.debug("Audio processing completed")
-    
-    # Step 7: Combine
-    logger.debug("Step 5: Combining PDF and audio markdown...")
-    
-    with open(ppt_md, "r", encoding="utf-8") as f:
-        ppt_content = f.read()
-    
-    combined_markdown = combine_speech_and_slides_by_timestamp(
-        speech_markdown=audio_markdown,
-        slides_markdown=ppt_content,
-        verbose=verbose
-    )
-    
-    combine_md = os.path.join(output_dir, f"{base_name}_combine.md")
-    with open(combine_md, "w", encoding="utf-8") as f:
-        f.write(combined_markdown)
-    
-    logger.debug(f"Combined markdown created: {combine_md} (timestamps preserved)")
-    
-    # Step 8: Clean (if not --no-clean)
-    if no_clean:
-        combine_clean_md = None
-        logger.debug("--no-clean flag set: Skipping clean phase")
-    else:
-        logger.debug("Step 6: Cleaning combined markdown...")
-        combine_clean_md = clean_combined_markdown(
-            combine_md, output_dir, base_name, logger, verbose
-        )
-        logger.debug(f"Cleaned markdown created: {combine_clean_md}")
-    
-    logger.debug("=== PPT Method Complete ===")
-    return combine_md, combine_clean_md
+                markdown_sections.append(section)
+                try:
+                    os.remove(temp_img_path)
+                except:
+                    pass
+            except Exception as e:
+                logger.warning(f"Error processing page {pdf_page_idx + 1}: {e}")
+                raise SystemExit(1)
+        ppt_md = os.path.join(output_dir, f"{base_name}_ppt.md")
+        with open(ppt_md, "w", encoding="utf-8") as f:
+            f.write("".join(markdown_sections))
+        logger.debug(f"PDF OCR completed: {ppt_md}")
+        return ppt_md
+    finally:
+        import shutil
+        try:
+            shutil.rmtree(temp_img_dir)
+        except:
+            pass
 
 
 def parse_time_to_seconds(time_str: str) -> int:
@@ -500,6 +407,189 @@ def parse_time_to_seconds(time_str: str) -> int:
         return 0
     except:
         return 0
+
+
+def _seconds_to_display(seconds: float) -> str:
+    """Format seconds as HH:MM:SS (no millis), matching bilingual.py format."""
+    seconds = max(float(seconds or 0), 0.0)
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+
+def _parse_vtt_to_segments(vtt_path: str) -> list[dict]:
+    """Parse a WebVTT file into [{'start': float, 'end': float, 'text': str}, ...].
+
+    Strips <v Speaker> tags from text. Handles both plain VTT and speaker-tagged VTT.
+    """
+    segments: list[dict] = []
+    with open(vtt_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    lines = content.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if "-->" in line:
+            try:
+                start_str, end_str = line.split("-->")
+                start_str = start_str.strip().split(".")[0]  # drop millis
+                end_str = end_str.strip().split(".")[0]
+                start_sec = parse_time_to_seconds(start_str)
+                end_sec = parse_time_to_seconds(end_str)
+                text_lines: list[str] = []
+                i += 1
+                while i < len(lines) and lines[i].strip() and "-->" not in lines[i]:
+                    raw = lines[i].strip()
+                    # strip <v Speaker>...</v> wrapper
+                    if raw.startswith("<v ") and ">" in raw:
+                        raw = raw.split(">", 1)[1]
+                    if raw.endswith("</v>"):
+                        raw = raw[:-4]
+                    text_lines.append(raw)
+                    i += 1
+                text = " ".join(text_lines).strip()
+                if text:
+                    segments.append({"start": float(start_sec), "end": float(end_sec), "text": text})
+            except Exception:
+                pass
+        else:
+            i += 1
+    return segments
+
+
+def recover_timestamps_from_vtt(
+    speech_markdown: str,
+    vtt_path: str,
+    verbose: bool = False,
+) -> str:
+    """Recover ### **HH:MM:SS - HH:MM:SS** headers for timestamp-stripped markdown.
+
+    Bilingual subcommands (en-zh, en-en, zh-zh, speaker) produce rewritten markdown
+    with no timestamps (--- separated paragraphs). The VTT from stage 2 has timestamps
+    + raw transcript text. Since group_into_topics preserves 100% of text (only groups
+    adjacent segments) and rewrite_english keeps 97% wording, we can fuzzy-match each
+    rewritten paragraph against consecutive VTT segment windows to recover timestamps.
+
+    Algorithm:
+      1. Parse VTT → segments[(start, end, text)]
+      2. Split speech_markdown on '---' → paragraphs (in transcript order)
+      3. For each paragraph, try windows of 1..max_window consecutive VTT segments
+         starting from the current pointer; pick the window with highest
+         rapidfuzz.fuzz.partial_ratio score.
+      4. Assign that window's start..end as the paragraph timestamp range,
+         advance the pointer past the matched window.
+      5. Rebuild markdown with ### **HH:MM:SS - HH:MM:SS** headers.
+
+    Args:
+        speech_markdown: --- separated rewritten paragraphs (no timestamps)
+        vtt_path: path to the VTT file from stage 2 ASR
+        verbose: enable debug logging
+
+    Returns:
+        Markdown with ### **HH:MM:SS - HH:MM:SS** headers, ready for
+        combine_speech_and_slides_by_timestamp().
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Check if speech_markdown already has timestamp headers — no recovery needed
+    if "### **" in speech_markdown and " - " in speech_markdown:
+        if verbose:
+            logger.debug("recover_timestamps: speech_markdown already has timestamps, no recovery needed")
+        return speech_markdown
+
+    segments = _parse_vtt_to_segments(vtt_path)
+    if not segments:
+        if verbose:
+            logger.warning("recover_timestamps: no segments parsed from VTT, returning unchanged")
+        return speech_markdown
+
+    # Split on '---' separators (the format write_rewritten_markdown uses)
+    paragraphs = [p.strip() for p in speech_markdown.split("---") if p.strip()]
+    if not paragraphs:
+        if verbose:
+            logger.warning("recover_timestamps: no paragraphs found in speech_markdown")
+        return speech_markdown
+
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # ponytail: difflib fallback if rapidfuzz not available
+        from difflib import SequenceMatcher
+
+        class _Fuzz:
+            @staticmethod
+            def ratio(a: str, b: str) -> float:
+                return SequenceMatcher(None, a, b).ratio() * 100
+
+        fuzz = _Fuzz()
+
+    max_window = min(20, len(segments))  # cap window size
+    seg_ptr = 0  # forward-only pointer into VTT segments
+
+    result_parts: list[str] = []
+    matched_count = 0
+
+    for para_idx, paragraph in enumerate(paragraphs):
+        # Strip bilingual labels like **[English]** / **[中文]** for matching
+        match_text = paragraph
+        for label in ("**[English]**", "**[中文]**", "**[EN]**", "**[ZH]**"):
+            match_text = match_text.replace(label, "")
+        match_text = match_text.strip()
+
+        best_score = -1.0
+        best_window_end = seg_ptr + 1  # default: single segment
+        best_start = segments[seg_ptr]["start"] if seg_ptr < len(segments) else 0.0
+        best_end = segments[seg_ptr]["end"] if seg_ptr < len(segments) else 0.0
+
+        # Try windows of increasing size from current pointer.
+        # Use fuzz.ratio (not partial_ratio) — ratio compares full strings and
+        # penalizes length mismatch, so the correct-size window scores highest.
+        # partial_ratio finds best substring → bigger windows always win.
+        max_end = min(seg_ptr + max_window, len(segments))
+        for window_end in range(seg_ptr + 1, max_end + 1):
+            window_text = " ".join(s["text"] for s in segments[seg_ptr:window_end])
+            score = fuzz.ratio(match_text, window_text)
+            if score > best_score:
+                best_score = score
+                best_window_end = window_end
+                best_start = segments[seg_ptr]["start"]
+                best_end = segments[window_end - 1]["end"]
+
+        # Assign timestamp range
+        start_ts = _seconds_to_display(best_start)
+        end_ts = _seconds_to_display(best_end)
+        header = f"### **{start_ts} - {end_ts}**"
+        result_parts.append(f"{header}\n\n{paragraph}")
+
+        # Advance pointer past matched window
+        seg_ptr = best_window_end
+        matched_count += 1
+
+        if verbose:
+            logger.debug(
+                "recover_timestamps: para %d/%d → %s - %s (score=%.1f, %d segments)",
+                para_idx + 1,
+                len(paragraphs),
+                start_ts,
+                end_ts,
+                best_score,
+                best_window_end - (best_window_end - max(0, seg_ptr - (best_window_end - seg_ptr))),
+            )
+
+    if verbose:
+        logger.debug(
+            "recover_timestamps: matched %d/%d paragraphs, %d/%d VTT segments consumed",
+            matched_count,
+            len(paragraphs),
+            seg_ptr,
+            len(segments),
+        )
+
+    return "\n\n".join(result_parts)
 
 
 def combine_speech_and_slides_by_timestamp(speech_markdown: str, slides_markdown: str, verbose: bool = False) -> str:

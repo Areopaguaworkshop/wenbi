@@ -5,12 +5,11 @@ Wenbi is a CLI-first toolkit that turns media (video/audio/URL) and text into st
 It supports:
 - Video/audio/URL transcription to VTT/Markdown
 - Text rewriting (`rewrite`, `academic` style)
-- Translation (`translate`) with **DeepL first**, then **LLM fallback**
-- English interview rewriting (`en-en`) with speaker-separated output
+- English interview rewriting (`en-en`) with speaker-separated output, now bilingual by default (English → Chinese)
 - Chinese interview rewriting (`zh-zh`) with speaker-separated output
 - English/Chinese bilingual audio extraction (`en-zh`) — keep English, translate to Chinese
 - Single-language multi-speaker diarization (`speaker`) with rewrite + translate
-- PPT-style slide + speech combination (`ppt`)
+- Optional slide-combine (`--ppt` / `-p` on any subcommand) — align slides with speech by timestamp
 - Batch directory processing (`wenbi-batch`)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/wenbi?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/wenbi)
 
@@ -40,8 +39,12 @@ input (media / URL / text / subtitles)
   │                                EN→ZH glossary applied by default
   │                                (DeepL glossary API + LLM prompt).
   │
-  6. Slide combine (ppt only)  ── frame extraction + OCR → slides aligned
-  │                                with speech by timestamp
+  6. Slide combine (--ppt only)  ── frame extraction + optional OCR → slides aligned
+  │                                with speech by timestamp.
+  │                                Bare --ppt: embed frames as base64 (TYPE 1, no OCR).
+  │                                --ppt <file>: OCR the slides file, match to frames (TYPE 3).
+  │                                Bilingual subcommands: timestamps recovered from VTT
+  │                                via rapidfuzz fuzzy matching before alignment.
   │
   └── outputs in --output-dir:   *_rewritten.md, *_translated.md,
                                   *_bilingual.md, *_zh.md, *_en.md,
@@ -53,12 +56,11 @@ Subcommand → pipeline mapping:
 | Command | Stages |
 |---|---|
 | `rewrite` / `rw` | 1 → 2 → 4 |
-| `translate` / `tr` | 1 (or text-only) → 5 |
-| `en-en` / `enen` | 1 → 2 → 3 → 4 (interview rewrite defaults) |
+| `en-en` / `enen` | 1 → 2 → 3 → 4 → 5 (interview rewrite + translate defaults) |
 | `zh-zh` / `zhzh` | 1 → 2 → 3 → 4 (interview rewrite defaults) |
 | `en-zh` / `enzh` | 1 → 2 → 3 (keep EN, drop ZH) → 5 |
 | `speaker` / `sp` | 1 → 2 → 3 → 4 → 5 |
-| `ppt` / `p` | 1 → 2 → 6 (slides + speech, optional rewrite/translate) |
+| *any* + `--ppt` | adds stage 6 (slide-combine) on top of the subcommand's own stages |
 | `wenbi-batch` | runs one of the above over every media file in a directory |
 
 ## Install
@@ -89,12 +91,6 @@ Rewrite:
 wenbi rewrite input.mp4 --lang Chinese --llm ollama/qwen3.5:cloud
 ```
 
-Translate (DeepL first):
-
-```bash
-wenbi translate input.md --lang Chinese --deepl-key "$DEEPL_API_KEY"
-```
-
 English interview rewrite:
 
 ```bash
@@ -119,10 +115,14 @@ Single-language multi-speaker (diarize, rewrite, translate):
 wenbi speaker panel.mp4 --source-lang en --gladia-key "$GLADIA_API_KEY"
 ```
 
-PPT workflow:
+Slide-combine (any subcommand + `--ppt`):
 
 ```bash
-wenbi ppt lecture.mp4 --lang English
+# TYPE 1: embed video frames as base64, combine with rewritten speech
+wenbi rewrite lecture.mp4 --ppt
+
+# TYPE 3: OCR an external slides file, match to video frames, combine
+wenbi rewrite lecture.mp4 --ppt slides.pdf
 ```
 
 ## Commands
@@ -142,31 +142,8 @@ Key options:
 - `--cite-timestamps`
 - `--start-time`, `--end-time` (media/URL)
 
-### `translate` (`tr`)
-Translate content to a target language.
-
-```bash
-wenbi translate <input> --lang <target> [options]
-```
-
-Key options:
-- `--deepl-key` (or `DEEPL_API_KEY` env var)
-- `--llm` (fallback model)
-- `--asr-provider auto|gladia|funasr|whisper`
-- `--glossary` / `--no-glossary` (default: enabled, EN→ZH term consistency)
-- `--glossary-file path.json` (custom `{english: chinese}` glossary)
-- `--keep-original-lang`
-- `--cite-timestamps`
-
-#### Translation behavior
-`translate` uses this order:
-1. Try DeepL API first (when key is available).
-2. If DeepL is unavailable or chunk translation fails, fallback to LLM.
-
-If both DeepL and LLM are unavailable, translation cannot complete successfully.
-
 ### `en-en` (`enen`)
-Transcribe an English interview, separate speaker turns, and rewrite it as polished written English using `ollama/qwen3.5:cloud` by default.
+Transcribe an English interview, separate speaker turns, rewrite it as polished written English, and translate to Chinese by default (DeepL first, LLM fallback). Runs stages 1 → 2 → 3 → 4 → 5.
 
 ```bash
 wenbi en-en <input> [options]
@@ -177,6 +154,10 @@ Key options:
 - `--asr-provider auto|gladia|funasr|whisper`
 - `--gladia-key` (or `GLADIA_API_KEY` env var)
 - `--llm` (default: `ollama/qwen3.5:cloud`)
+- `--lang` — target translation language (default: `Chinese`; set to `English` to skip translation and keep English-only output)
+- `--deepl-key` (or `DEEPL_API_KEY` env var)
+- `--glossary` / `--no-glossary` (default: enabled, EN→ZH term consistency)
+- `--glossary-file path.json` (custom `{english: chinese}` glossary)
 - `--start-time`, `--end-time` (media/URL)
 
 The rewrite preserves speaker labels and adds a `## Questions for Clarification` section when speaker roles, names, terms, or ambiguous ASR phrases need human confirmation.
@@ -239,20 +220,32 @@ Key options:
 
 Outputs a transcript VTT, transcript Markdown, rewritten Markdown, and (when translation is requested) a bilingual Markdown.
 
-### `ppt` (`p`)
-Extract slides from video, align with speech, and export combined markdown.
+## Slide-Combine (`--ppt` / `-p`)
+
+Any subcommand accepts `--ppt` / `-p` to add stage 6 (slide-combine) on top of its own stages. Useful for lectures and talks where slides should be aligned with the transcript.
 
 ```bash
-wenbi ppt <video_or_url> [options]
+wenbi <subcommand> <input> --ppt [slides_file] [options]
 ```
 
-Key options:
-- `--frame-interval`
-- `--cropped-slide [auto|x0,y0,x1,y1]`
-- `--ppt <ppt/pdf/image/odp>`
-- `--no-ocr`
-- `--no-clean`
-- `--ssim-threshold`, `--hist-threshold`, `--dedup-method`
+Two modes:
+- **Bare `--ppt` / `-p`** (TYPE 1): extract video frames, deduplicate, embed as base64 images with timestamps. No OCR — frames are the slides.
+- **`--ppt <file>` / `-p <file>`** (TYPE 3): OCR the given PPT/PDF/image file, match pages to video frames via SSIM, combine. Higher quality when a clean slides file is available.
+
+Slide options (apply to both modes):
+- `--frame-interval` — extract a frame every N seconds (default: 60)
+- `--max-slides`, `--no-deduplicate`, `--dedup-method`, `--similarity-threshold`, `--ssim-threshold`, `--hist-threshold`
+- `--no-clean` — keep timestamps and image references in combined output
+- `--no-ocr` — TYPE 3 only: embed slide images as base64 instead of OCR'ing them
+
+Outputs `{base}_combine.md` (and `{base}_combine_clean.md` unless `--no-clean`).
+
+### Timestamp alignment
+
+Slide-combine aligns slides to speech by timestamp (`### **HH:MM:SS**` headers). Two paths:
+
+- **`rewrite` subcommand**: produces timestamped speech directly (forces `--cite-timestamps` when `--ppt` is set). Slides align precisely.
+- **Bilingual subcommands** (`en-zh`, `en-en`, `zh-zh`, `speaker`): the rewritten output strips timestamps (clean prose separated by `---`). `--ppt` recovers timestamps by fuzzy-matching each rewritten paragraph against the VTT file from stage 2 ASR using `rapidfuzz`. Since `group_into_topics` preserves 100% of transcript text and `rewrite_english` keeps ~97% wording, the match scores high and the correct VTT segment window is found for each paragraph. The recovered timestamps are then used for slide alignment.
 
 ## Supported Inputs
 
@@ -277,7 +270,7 @@ Used by subcommands:
 
 ## Glossary
 
-Translation subcommands (`translate`, `en-zh`, `speaker`) apply a built-in **EN→ZH patristic glossary** by default for term consistency. This covers ~800 Orthodox Christian / patristic terms (e.g. *theosis* → 神化, *theoria* → 静观, *Origen* → 奥利金).
+Translation-capable subcommands (`en-en`, `en-zh`, `speaker`) apply a built-in **EN→ZH patristic glossary** by default for term consistency. This covers ~800 Orthodox Christian / patristic terms (e.g. *theosis* → 神化, *theoria* → 静观, *Origen* → 奥利金).
 
 - `--glossary` / `--no-glossary` — toggle the glossary (default: enabled). No-op when the target language is not Chinese.
 - `--glossary-file path.json` — supply a custom glossary JSON (`{english: chinese}` dict). Overrides the built-in patristic glossary.
@@ -336,10 +329,8 @@ from wenbi.main import process_input
 
 text, md_file, csv_file, base_name = process_input(
     file_path="input.mp4",
-    subcommand="translate",
+    subcommand="rewrite",
     lang="Chinese",
-    use_deepl=True,
-    deepl_key="<DEEPL_KEY>",
     llm="ollama/qwen3.5:cloud",
 )
 ```

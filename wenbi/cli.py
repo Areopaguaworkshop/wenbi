@@ -8,10 +8,7 @@ import yaml
 
 from wenbi.download import download_all
 from wenbi.main import process_input
-from wenbi.model import (
-    rewrite,
-    translate,
-)
+from wenbi.model import rewrite, translate
 from wenbi.ppt_slide import combine_speech_and_slides_by_timestamp
 
 
@@ -298,6 +295,9 @@ def handle_rewrite_command(args):
     # Load config if provided
     config = load_config(args.config)
 
+    # --ppt forces cite_timestamps=True so combine can align slides with speech
+    ppt_active = getattr(args, "ppt", None) is not None
+
     # Prepare parameters
     params = {
         "output_dir": args.output_dir or config.get("output_dir", ""),
@@ -313,7 +313,7 @@ def handle_rewrite_command(args):
         "multi_language": args.multi_language or config.get("multi_language", False),
         "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
         "output_wav": args.output_wav or config.get("output_wav", ""),
-        "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
+        "cite_timestamps": True if ppt_active else (args.cite_timestamps or config.get("cite_timestamps", False)),
         "verbose": args.verbose,
     }
 
@@ -363,83 +363,22 @@ def handle_rewrite_command(args):
             print("Output file:", result[1] if result[1] else "Text output only")
             if result[1]:
                 print("You can find the rewritten text in:", result[1])
+
+        # Stage 6: slide-combine (optional, gated by --ppt)
+        if ppt_active:
+            output_dir = params["output_dir"] or os.getcwd()
+            base_name = result[3] or os.path.splitext(os.path.basename(args.input))[0]
+            is_url = args.input.startswith(("http://", "https://", "www."))
+            combine_md, combine_clean_md = finalize_with_slides(
+                args, result[0], args.input, output_dir, base_name, logger, args.verbose
+            )
+            if combine_md:
+                print("Combined:", combine_md)
+            if combine_clean_md:
+                print("Cleaned:", combine_clean_md)
     else:
         print("Error:", result[0])
 
-
-def handle_translate_command(args):
-    """Handle the translate subcommand"""
-    logger = setup_logging(args.verbose)
-
-    if args.verbose:
-        logger.debug("Starting translate command")
-        logger.debug(f"Input: {args.input}")
-
-    # Validate transcription arguments
-    validate_transcription_args(args)
-
-    # Load config if provided
-    config = load_config(args.config)
-
-    # DeepL is always enabled by default
-    deepl_key = args.deepl_key if hasattr(args, 'deepl_key') else ""
-
-    # Prepare parameters
-    params = {
-        "output_dir": args.output_dir or config.get("output_dir", ""),
-        "llm": args.llm or config.get("llm", ""),
-        "chunk_length": args.chunk_length or config.get("chunk_length", 20),
-        "max_tokens": args.max_tokens or config.get("max_tokens", 64000),
-        "timeout": args.timeout or config.get("timeout", 3600),
-        "temperature": args.temperature or config.get("temperature", 0.1),
-        "lang": args.lang or config.get("lang", "Chinese"),
-        "subcommand": "translate",
-        "asr_provider": getattr(args, "asr_provider", "auto"),
-        "multi_language": args.multi_language or config.get("multi_language", False),
-        "transcribe_lang": args.transcribe_lang or config.get("transcribe_lang", ""),
-        "output_wav": args.output_wav or config.get("output_wav", ""),
-        "cite_timestamps": args.cite_timestamps or config.get("cite_timestamps", False),
-        "keep_original_lang": args.keep_original_lang or config.get("keep_original_lang", False),
-        "use_deepl": True,
-        "deepl_key": deepl_key,
-        "use_glossary": getattr(args, "glossary", True),
-        "glossary_file": getattr(args, "glossary_file", None),
-        "verbose": args.verbose,
-    }
-
-    if args.verbose:
-        logger.debug("Configuration:")
-        for key, value in params.items():
-            if key != "verbose":
-                logger.debug(f"  {key}: {value}")
-
-    # Handle timestamp parameters
-    if args.start_time and args.end_time:
-        params["timestamp"] = parse_timestamp(args.start_time, args.end_time)
-        if args.verbose:
-            logger.debug(
-                f"Processing timestamp segment: {args.start_time} - {args.end_time}"
-            )
-    else:
-        params["timestamp"] = None
-
-    # Use the new process_input function that handles all file types
-    try:
-        is_url = args.input.startswith(("http://", "https://", "www."))
-        result = process_input(
-            None if is_url else args.input, args.input if is_url else "", **params
-        )
-
-        if result[0] and not result[0].startswith("Error"):
-            print("Translation completed successfully!")
-            print("Output file:", result[1] if result[1] else "Text output only")
-            if result[1]:
-                print("You can find the translated text in:", result[1])
-        else:
-            print("Error:", result[0] if result[0] else "Unknown error (no error message returned)")
-    except Exception as e:
-        logger.exception("Unexpected error during translation")
-        print(f"Error: {e}")
 
 
 def handle_en_zh_command(args):
@@ -496,6 +435,28 @@ def handle_en_zh_command(args):
     if result.diagnostics_json:
         print("Diagnostics JSON:", result.diagnostics_json)
 
+    # Stage 6: slide-combine (optional, gated by --ppt)
+    # Timestamps recovered from VTT via fuzzy matching (rapidfuzz).
+    # Reads english_rewritten_md as the speech markdown for combine.
+    if getattr(args, "ppt", None) is not None and result.english_rewritten_md:
+        output_dir = args.output_dir or os.getcwd()
+        base_name = os.path.splitext(os.path.basename(args.input))[0]
+        try:
+            with open(result.english_rewritten_md, "r", encoding="utf-8") as f:
+                speech_md = f.read()
+            combine_md, combine_clean_md = finalize_with_slides(
+                args, speech_md, args.input, output_dir, base_name, logger, args.verbose,
+                vtt_path=result.english_vtt,
+            )
+            if combine_md:
+                print("Combined:", combine_md)
+            if combine_clean_md:
+                print("Cleaned:", combine_clean_md)
+        except Exception as e:
+            print(f"Warning: --ppt slide-combine failed: {e}")
+            if args.verbose:
+                logger.exception("--ppt combine error details:")
+
 
 def handle_speaker_command(args):
     """Handle the speaker subcommand — single-language multi-speaker workflow."""
@@ -551,6 +512,27 @@ def handle_speaker_command(args):
     if result.diagnostics_json:
         print("Diagnostics JSON:", result.diagnostics_json)
 
+    # Stage 6: slide-combine (optional, gated by --ppt)
+    # Timestamps recovered from VTT via fuzzy matching (rapidfuzz).
+    if getattr(args, "ppt", None) is not None and result.rewritten_md:
+        output_dir = args.output_dir or os.getcwd()
+        base_name = os.path.splitext(os.path.basename(args.input))[0]
+        try:
+            with open(result.rewritten_md, "r", encoding="utf-8") as f:
+                speech_md = f.read()
+            combine_md, combine_clean_md = finalize_with_slides(
+                args, speech_md, args.input, output_dir, base_name, logger, args.verbose,
+                vtt_path=result.transcript_vtt,
+            )
+            if combine_md:
+                print("Combined:", combine_md)
+            if combine_clean_md:
+                print("Cleaned:", combine_clean_md)
+        except Exception as e:
+            print(f"Warning: --ppt slide-combine failed: {e}")
+            if args.verbose:
+                logger.exception("--ppt combine error details:")
+
 
 def handle_zh_zh_command(args):
     """Handle Chinese interview transcription and speaker-preserving rewrite."""
@@ -604,6 +586,27 @@ def handle_zh_zh_command(args):
     if result.diagnostics_json:
         print("Diagnostics JSON:", result.diagnostics_json)
 
+    # Stage 6: slide-combine (optional, gated by --ppt)
+    # Timestamps recovered from VTT via fuzzy matching (rapidfuzz).
+    if getattr(args, "ppt", None) is not None and result.rewritten_md:
+        output_dir = args.output_dir or os.getcwd()
+        base_name = os.path.splitext(os.path.basename(args.input))[0]
+        try:
+            with open(result.rewritten_md, "r", encoding="utf-8") as f:
+                speech_md = f.read()
+            combine_md, combine_clean_md = finalize_with_slides(
+                args, speech_md, args.input, output_dir, base_name, logger, args.verbose,
+                vtt_path=result.transcript_vtt,
+            )
+            if combine_md:
+                print("Combined:", combine_md)
+            if combine_clean_md:
+                print("Cleaned:", combine_clean_md)
+        except Exception as e:
+            print(f"Warning: --ppt slide-combine failed: {e}")
+            if args.verbose:
+                logger.exception("--ppt combine error details:")
+
 
 def handle_en_en_command(args):
     """Handle English interview transcription and speaker-preserving rewrite."""
@@ -624,7 +627,7 @@ def handle_en_en_command(args):
             end_time=args.end_time,
             asr_provider=args.asr_provider,
             source_lang="en",
-            target_language=args.lang or "English",
+            target_language=args.lang or "Chinese",
             llm=args.llm or "ollama/glm-5.2:cloud",
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
@@ -658,6 +661,27 @@ def handle_en_en_command(args):
         print("Gladia Raw VTT:", result.gladia_vtt)
     if result.diagnostics_json:
         print("Diagnostics JSON:", result.diagnostics_json)
+
+    # Stage 6: slide-combine (optional, gated by --ppt)
+    # Timestamps recovered from VTT via fuzzy matching (rapidfuzz).
+    if getattr(args, "ppt", None) is not None and result.rewritten_md:
+        output_dir = args.output_dir or os.getcwd()
+        base_name = os.path.splitext(os.path.basename(args.input))[0]
+        try:
+            with open(result.rewritten_md, "r", encoding="utf-8") as f:
+                speech_md = f.read()
+            combine_md, combine_clean_md = finalize_with_slides(
+                args, speech_md, args.input, output_dir, base_name, logger, args.verbose,
+                vtt_path=result.transcript_vtt,
+            )
+            if combine_md:
+                print("Combined:", combine_md)
+            if combine_clean_md:
+                print("Cleaned:", combine_clean_md)
+        except Exception as e:
+            print(f"Warning: --ppt slide-combine failed: {e}")
+            if args.verbose:
+                logger.exception("--ppt combine error details:")
 
 
 def add_global_args(subparser):
@@ -726,6 +750,208 @@ def add_global_args(subparser):
         default="",
         help="Filename for saving the segmented WAV (optional)",
     )
+
+
+def add_slide_args(subparser):
+    """Add --ppt / -p and frame-extraction options to a subcommand parser.
+
+    --ppt absent      : no slide workflow (normal subcommand behavior)
+    --ppt (no value)  : TYPE 1 — embed video frames as base64 with timestamps (no OCR)
+    --ppt <file>      : TYPE 3 — OCR the slides file (PPT/PDF/image), match pages
+                        to video frames via SSIM, combine
+    """
+    subparser.add_argument(
+        "--ppt",
+        "-p",
+        nargs="?",
+        const="",
+        default=None,
+        help="Enable slide-combine (stage 6). Bare --ppt / -p: embed video frames "
+             "as base64 (TYPE 1, no OCR). --ppt <file>: OCR the given PPT/PDF/image "
+             "and match to frames (TYPE 3).",
+    )
+    subparser.add_argument(
+        "--frame-interval",
+        type=int,
+        default=60,
+        help="Extract frame every N seconds for initial extraction (default: 60).",
+    )
+    subparser.add_argument(
+        "--max-slides",
+        "-ms",
+        type=int,
+        default=20,
+        help="Maximum number of slides to extract (default: 20).",
+    )
+    subparser.add_argument(
+        "--no-deduplicate",
+        action="store_true",
+        default=False,
+        help="Disable duplicate slide removal (default: deduplication enabled).",
+    )
+    subparser.add_argument(
+        "--similarity-threshold",
+        "-sim",
+        type=float,
+        default=0.85,
+        help="Text similarity threshold for deduplication, 0.0-1.0 (default: 0.85).",
+    )
+    subparser.add_argument(
+        "--dedup-method",
+        choices=["image", "text", "both"],
+        default="both",
+        help="Deduplication method: image (SSIM), text (content), or both (default: both).",
+    )
+    subparser.add_argument(
+        "--ssim-threshold",
+        type=float,
+        default=0.98,
+        help="SSIM threshold for image deduplication, 0.0-1.0 (default: 0.98).",
+    )
+    subparser.add_argument(
+        "--hist-threshold",
+        type=float,
+        default=0.15,
+        help="Histogram correlation threshold for image deduplication pre-filter, 0.0-1.0 (default: 0.15).",
+    )
+    subparser.add_argument(
+        "--no-clean",
+        action="store_true",
+        default=False,
+        help="Keep timestamps and image references in final combined output",
+    )
+    subparser.add_argument(
+        "--no-ocr",
+        action="store_true",
+        default=False,
+        help="Skip OCR on slide images, embed them as base64 instead (TYPE 3 only; TYPE 1 never OCRs).",
+    )
+
+
+def finalize_with_slides(args, audio_markdown, video_path, output_dir, base_name,
+                          logger, verbose, vtt_path=None):
+    """Stage 6: when --ppt is set, extract frames, build slides (TYPE 1 or TYPE 3),
+    combine with the host command's audio_markdown, clean, and return output paths.
+
+    Returns (combine_md, combine_clean_md) when --ppt is set, else (None, None).
+    Only adds stage 6 — the host command has already run stages 1-5 (download, ASR,
+    diarize, rewrite, translate) and produced audio_markdown.
+
+    audio_markdown should be timestamped (### **HH:MM:SS - HH:MM:SS** headers) for
+    alignment. The `rewrite` subcommand produces this directly (forces
+    cite_timestamps=True when --ppt is set). The bilingual subcommands strip
+    timestamps — pass vtt_path so we can recover timestamps via fuzzy matching
+    against the VTT before combining.
+    """
+    if getattr(args, "ppt", None) is None:
+        return None, None
+
+    from wenbi.ppt_slide import (
+        build_slides_markdown,
+        combine_speech_and_slides_by_timestamp,
+        recover_timestamps_from_vtt,
+    )
+
+    is_url = video_path.startswith(("http://", "https://", "www."))
+
+    # Download video if URL (frames need a local file)
+    if is_url:
+        if verbose:
+            logger.debug("--ppt: downloading video for frame extraction...")
+        from wenbi.utils import download_video
+        try:
+            download_result = download_video(video_path, output_dir=output_dir, verbose=verbose)
+            if download_result:
+                video_path = download_result
+            else:
+                print("Error: Failed to download video from URL for --ppt")
+                sys.exit(1)
+        except Exception as e:
+            print(f"Error downloading video for --ppt: {e}")
+            sys.exit(1)
+        if verbose:
+            logger.debug(f"--ppt: video downloaded to: {video_path}")
+
+    # Validate local video file
+    if not is_url:
+        from wenbi.video_slides import validate_video_input
+        if not validate_video_input(video_path, logger, verbose):
+            print(f"Error: Invalid video file for --ppt: {video_path}")
+            sys.exit(1)
+
+    if verbose:
+        logger.debug("--ppt: Step 1: Extracting and deduplicating frames...")
+
+    deduplicated_frames = extract_and_deduplicate_frames(
+        video_path=video_path,
+        start_time=getattr(args, "start_time", ""),
+        end_time=getattr(args, "end_time", ""),
+        frame_interval=args.frame_interval,
+        ssim_threshold=args.ssim_threshold,
+        hist_threshold=args.hist_threshold,
+        output_dir=output_dir,
+        logger=logger,
+        verbose=verbose,
+    )
+
+    if verbose:
+        logger.debug(
+            f"--ppt: {len(deduplicated_frames)} deduplicated frames extracted"
+        )
+
+    # Build slides markdown
+    slides_md = build_slides_markdown(
+        deduplicated_frames=deduplicated_frames,
+        ppt_path=args.ppt if args.ppt else None,  # "" -> None for TYPE 1
+        output_dir=output_dir,
+        no_ocr=args.no_ocr,
+        base_name=base_name,
+        logger=logger,
+        verbose=verbose,
+        ssim_threshold=args.ssim_threshold,
+    )
+
+    if verbose:
+        logger.debug("--ppt: Step 6: Combining slides and audio markdown...")
+
+    # Recover timestamps for bilingual output if VTT is available
+    speech_md = audio_markdown
+    if vtt_path and os.path.exists(vtt_path):
+        if verbose:
+            logger.debug(f"--ppt: recovering timestamps from VTT: {vtt_path}")
+        speech_md = recover_timestamps_from_vtt(
+            speech_markdown=audio_markdown,
+            vtt_path=vtt_path,
+            verbose=verbose,
+        )
+
+    with open(slides_md, "r", encoding="utf-8") as f:
+        slides_content = f.read()
+
+    combined_markdown = combine_speech_and_slides_by_timestamp(
+        speech_markdown=speech_md,
+        slides_markdown=slides_content,
+        verbose=verbose,
+    )
+
+    combine_md = os.path.join(output_dir, f"{base_name}_combine.md")
+    with open(combine_md, "w", encoding="utf-8") as f:
+        f.write(combined_markdown)
+
+    if verbose:
+        logger.debug(f"--ppt: Combined markdown: {combine_md}")
+
+    # Clean (if not --no-clean)
+    if args.no_clean:
+        combine_clean_md = None
+        if verbose:
+            logger.debug("--ppt: --no-clean: skipping clean phase")
+    else:
+        combine_clean_md = clean_combined_markdown(
+            combine_md, output_dir, base_name, logger, verbose
+        )
+
+    return combine_md, combine_clean_md
     subparser.add_argument(
         "--start-time",
         "-st",
@@ -1029,278 +1255,6 @@ def clean_combined_markdown(combine_md_path, output_dir, base_name, logger, verb
         logger.debug(f"Cleaned markdown: {clean_path}")
 
     return clean_path
-
-
-def handle_ppt_command(args):
-    """Handle ppt subcommand - main entry point for all 3 PPT workflow methods"""
-    import subprocess
-
-    logger = setup_logging(args.verbose)
-    config = load_config(args.config)
-
-    if args.verbose:
-        logger.debug("Starting PPT workflow")
-        logger.debug(f"Input: {args.input}")
-
-    # Validate input
-    if not args.input:
-        print("Error: Video file or URL is required")
-        sys.exit(1)
-
-    output_dir = args.output_dir or os.getcwd()
-    # PPT always forces timestamped speech output for alignment
-    cite_timestamps = True
-    os.makedirs(output_dir, exist_ok=True)
-    base_name = os.path.splitext(os.path.basename(args.input))[0]
-    is_url = args.input.startswith(("http://", "https://", "www."))
-
-    # Input validation for local files
-    if not is_url:
-        from wenbi.video_slides import validate_video_input
-
-        if not validate_video_input(args.input, logger, args.verbose):
-            print(f"Error: Invalid video file: {args.input}")
-            sys.exit(1)
-
-    video_path = args.input
-
-    # Download video if URL
-    if is_url:
-        if args.verbose:
-            logger.debug("Downloading video from URL...")
-
-        from wenbi.utils import download_video
-
-        try:
-            download_result = download_video(
-                args.input, output_dir=output_dir, verbose=args.verbose
-            )
-            if download_result:
-                video_path = download_result
-            else:
-                print("Error: Failed to download video from URL")
-                sys.exit(1)
-        except Exception as e:
-            print(f"Error downloading video: {e}")
-            sys.exit(1)
-
-        if args.verbose:
-            logger.debug(f"Video downloaded to: {video_path}")
-
-    # COMMON FOUNDATION: Extract frames + deduplicate
-    if args.verbose:
-        logger.debug("Step 1: Extracting and deduplicating frames...")
-
-    deduplicated_frames = extract_and_deduplicate_frames(
-        video_path=video_path,
-        start_time=args.start_time,
-        end_time=args.end_time,
-        frame_interval=args.frame_interval,
-        ssim_threshold=args.ssim_threshold,
-        hist_threshold=args.hist_threshold,
-        output_dir=output_dir,
-        logger=logger,
-        verbose=args.verbose,
-    )
-
-    if args.verbose:
-        logger.debug(
-            f"Frame extraction complete: {len(deduplicated_frames)} deduplicated frames extracted"
-        )
-        for i, frame in enumerate(deduplicated_frames[:5]):  # Show first 5
-            logger.debug(
-                f"  Frame {i + 1}: {frame['timestamp']} -> {frame['frame_path']}"
-            )
-        if len(deduplicated_frames) > 5:
-            logger.debug(f"  ... and {len(deduplicated_frames) - 5} more frames")
-
-    # ROUTE TO METHOD
-    try:
-        if args.ppt:
-            # TYPE 3: PPT METHOD
-            if args.verbose:
-                logger.debug("Routing to TYPE 3: PPT Method")
-            from wenbi.ppt_slide import execute_ppt_method
-
-            combine_md, combine_clean_md = execute_ppt_method(
-                video_path=video_path,
-                deduplicated_frames=deduplicated_frames,
-                ppt_path=args.ppt,
-                output_dir=output_dir,
-                no_ocr=args.no_ocr,
-                no_clean=args.no_clean,
-                base_name=base_name,
-                cite_timestamps=cite_timestamps,
-                llm=args.llm,
-                chunk_length=args.chunk_length,
-                max_tokens=args.max_tokens,
-                timeout=args.timeout,
-                temperature=args.temperature,
-                lang=args.lang,
-                transcribe_model=args.transcribe_model,
-                multi_language=args.multi_language,
-                transcribe_lang=args.transcribe_lang,
-                logger=logger,
-                verbose=args.verbose,
-                ssim_threshold=args.ssim_threshold,
-            )
-
-        elif args.cropped_slide is not None:
-            # TYPE 2: CROPPED-SLIDE METHOD
-            if args.verbose:
-                logger.debug("Routing to TYPE 2: CROPPED-SLIDE Method")
-            from wenbi.cropped_slide import execute_cropped_slide_method
-
-            combine_md, combine_clean_md = execute_cropped_slide_method(
-                video_path=video_path,
-                deduplicated_frames=deduplicated_frames,
-                roi_string=args.cropped_slide if args.cropped_slide != "auto" else None,
-                output_dir=output_dir,
-                no_ocr=args.no_ocr,
-                no_clean=args.no_clean,
-                base_name=base_name,
-                cite_timestamps=cite_timestamps,
-                llm=args.llm,
-                chunk_length=args.chunk_length,
-                max_tokens=args.max_tokens,
-                timeout=args.timeout,
-                temperature=args.temperature,
-                lang=args.lang,
-                transcribe_model=args.transcribe_model,
-                multi_language=args.multi_language,
-                transcribe_lang=args.transcribe_lang,
-                logger=logger,
-                verbose=args.verbose,
-            )
-
-        else:
-            # TYPE 1: FRAME METHOD (existing, refactored)
-            if args.verbose:
-                logger.debug("Routing to TYPE 1: FRAME Method")
-
-            if args.no_ocr:
-                if args.verbose:
-                    logger.debug("--no-ocr: Embedding frames as base64...")
-
-                slides_md = embed_frames_as_base64(
-                    deduplicated_frames, output_dir, base_name, logger, args.verbose
-                )
-            else:
-                if args.verbose:
-                    logger.debug("Step 2: Running OCR on frames...")
-
-                # OCR each frame
-                markdown_sections = []
-
-                for idx, frame_dict in enumerate(deduplicated_frames, 1):
-                    timestamp = frame_dict["timestamp"]
-                    frame_path = frame_dict["frame_path"]
-
-                    if args.verbose:
-                        logger.debug(
-                            f"OCR frame {idx}/{len(deduplicated_frames)}: {timestamp}"
-                        )
-
-                    ocr_result = run_marker_pdf_on_image(
-                        frame_path, output_dir, args.verbose, logger
-                    )
-
-                    section = f"\n### **{timestamp}**\n"
-
-                    if ocr_result["success"]:
-                        section += ocr_result["text"]
-
-                        # Add base64 images if any
-                        for filename, b64 in ocr_result["base64_images"].items():
-                            section += f'\n<img src="data:image/png;base64,{b64}" />\n'
-                    else:
-                        # OCR failed, embed as base64
-                        if args.verbose:
-                            logger.warning(f"OCR failed for {timestamp}, using base64")
-
-                        b64 = image_to_base64(frame_path)
-                        if b64:
-                            section += f'<img src="data:image/png;base64,{b64}" />\n'
-
-                    markdown_sections.append(section)
-
-                slides_md = os.path.join(output_dir, f"{base_name}_slides.md")
-                with open(slides_md, "w", encoding="utf-8") as f:
-                    f.write("".join(markdown_sections))
-
-                if args.verbose:
-                    logger.debug(f"OCR completed: {slides_md}")
-
-            # Step 3: Rewrite audio
-            if args.verbose:
-                logger.debug("Step 3: Processing audio...")
-
-            style = getattr(args, 'style', None) or 'rewrite'
-
-            params = {
-                "output_dir": output_dir,
-                "llm": args.llm,
-                "chunk_length": args.chunk_length,
-                "max_tokens": args.max_tokens,
-                "timeout": args.timeout,
-                "temperature": args.temperature,
-                "lang": args.lang,
-                "asr_provider": "funasr" if style == "zh-speaker" else getattr(args, "asr_provider", "auto"),
-                "multi_language": args.multi_language,
-                "transcribe_lang": args.transcribe_lang,
-                "cite_timestamps": cite_timestamps,
-                "verbose": args.verbose,
-                "subcommand": {"academic": "academic", "zh-speaker": "zh-speaker"}.get(style, "rewrite"),
-                "enable_speakers": style == "zh-speaker",
-            }
-
-            result = process_input(file_path=video_path, url="", **params)
-
-            audio_markdown = result[0]
-            if args.verbose:
-                logger.debug(f"Audio processing completed")
-
-            # Step 4: Combine
-            if args.verbose:
-                logger.debug("Step 4: Combining slide and audio markdown...")
-
-            with open(slides_md, "r", encoding="utf-8") as f:
-                slides_content = f.read()
-
-            combined_markdown = combine_speech_and_slides_by_timestamp(
-                speech_markdown=audio_markdown,
-                slides_markdown=slides_content,
-                verbose=args.verbose,
-            )
-
-            combine_md = os.path.join(output_dir, f"{base_name}_combine.md")
-            with open(combine_md, "w", encoding="utf-8") as f:
-                f.write(combined_markdown)
-
-            if args.verbose:
-                logger.debug(f"Combined markdown: {combine_md}")
-
-            # Step 5: Clean (if not --no-clean)
-            if args.no_clean:
-                combine_clean_md = None
-                if args.verbose:
-                    logger.debug("--no-clean: Skipping clean phase")
-            else:
-                combine_clean_md = clean_combined_markdown(
-                    combine_md, output_dir, base_name, logger, args.verbose
-                )
-
-        # Print results
-        print("✓ PPT processing completed!")
-        print(f"  Combined: {combine_md}")
-        if combine_clean_md:
-            print(f"  Cleaned: {combine_clean_md}")
-
-    except Exception as e:
-        print(f"Error during PPT processing: {e}")
-        if args.verbose:
-            logger.exception("Detailed error trace:")
-        sys.exit(1)
 
 
 def save_slides_to_markdown(
@@ -1855,7 +1809,7 @@ def main():
     print("Debug: download_all completed")
 
     # Check if this is a subcommand
-    subcommands = ["rewrite", "rw", "translate", "tr", "en-zh", "enzh", "en-en", "enen", "zh-zh", "zhzh", "speaker", "sp", "ppt", "p"]
+    subcommands = ["rewrite", "rw", "en-zh", "enzh", "en-en", "enen", "zh-zh", "zhzh", "speaker", "sp"]
     is_subcommand = len(sys.argv) > 1 and sys.argv[1] in subcommands
     print(f"Debug: sys.argv = {sys.argv}")
     print(f"Debug: is_subcommand = {is_subcommand}")
@@ -1876,6 +1830,7 @@ def main():
             "rewrite", aliases=["rw"], help="Rewrite text"
         )
         add_global_args(rewrite_parser)
+        add_slide_args(rewrite_parser)
         rewrite_parser.add_argument(
             "--style",
             choices=["rewrite", "academic", "zh-speaker"],
@@ -1884,25 +1839,6 @@ def main():
         )
         rewrite_parser.set_defaults(func=handle_rewrite_command)
 
-        # Translate subcommand
-        translate_parser = subparsers.add_parser(
-            "translate", aliases=["tr"], help="Translate text"
-        )
-        add_global_args(translate_parser)
-        translate_parser.add_argument(
-            "--glossary",
-            action=argparse.BooleanOptionalAction,
-            default=True,
-            help="Apply EN→ZH glossary for term consistency (DeepL glossary API + LLM prompt). No-op when target language is not Chinese (default: enabled).",
-        )
-        translate_parser.add_argument(
-            "--glossary-file",
-            type=str,
-            default=None,
-            help="Path to user glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
-        )
-        translate_parser.set_defaults(func=handle_translate_command)
-
         # English-to-Chinese bilingual audio subcommand
         en_zh_parser = subparsers.add_parser(
             "en-zh",
@@ -1910,6 +1846,7 @@ def main():
             help="Extract English from English/Chinese bilingual audio and translate it to Chinese",
         )
         add_global_args(en_zh_parser)
+        add_slide_args(en_zh_parser)
         en_zh_parser.add_argument(
             "--source-lang",
             default="en",
@@ -1966,6 +1903,7 @@ def main():
             help="Transcribe and rewrite English interviews with speaker-separated output",
         )
         add_global_args(en_en_parser)
+        add_slide_args(en_en_parser)
         en_en_parser.add_argument(
             "--gladia-key",
             default="",
@@ -1996,6 +1934,12 @@ def main():
             help="Save segment diagnostics and raw provider JSON when available",
         )
         en_en_parser.add_argument(
+            "--glossary",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Apply EN→ZH glossary for term consistency (DeepL glossary API + LLM prompt). No-op when target language is not Chinese (default: enabled).",
+        )
+        en_en_parser.add_argument(
             "--glossary-file",
             default=None,
             help="Path to a custom glossary JSON ({english: chinese} dict). Overrides the built-in patristic glossary.",
@@ -2011,6 +1955,7 @@ def main():
             help="Transcribe and rewrite Chinese interviews with speaker-separated output",
         )
         add_global_args(zh_zh_parser)
+        add_slide_args(zh_zh_parser)
         zh_zh_parser.add_argument(
             "--gladia-key",
             default="",
@@ -2051,6 +1996,7 @@ def main():
             help="Transcribe single-language multi-speaker audio with diarization, rewrite, and translate",
         )
         add_global_args(speaker_parser)
+        add_slide_args(speaker_parser)
         speaker_parser.add_argument(
             "--source-lang",
             default="en",
@@ -2101,118 +2047,6 @@ def main():
             func=handle_speaker_command,
         )
 
-        # PPT subcommand - extract slides from video and combine with speech
-        ppt_parser = subparsers.add_parser(
-            "ppt",
-            aliases=["p"],
-            help="Extract slides from video and combine with speech",
-        )
-        add_global_args(ppt_parser)
-        # Note: Legacy slide timing options removed for new workflow
-        # Frame extraction options (for new workflow)
-        ppt_parser.add_argument(
-            "--frame-interval",
-            type=int,
-            default=60,
-            help="Extract frame every N seconds for initial extraction (default: 60).",
-        )
-        ppt_parser.add_argument(
-            "--each-roi",
-            action="store_true",
-            default=False,
-            help="Enable per-frame ROI detection instead of single ROI for all frames (default: disabled).",
-        )
-        ppt_parser.add_argument(
-            "--roi",
-            nargs="?",
-            const="",
-            default=None,
-            help="Manual ROI coordinates as 'x0,y0,x1,y1' in pixels. --roi with no value uses full screen (default: auto-detect). Example: --roi '100,50,1660,850'",
-        )
-        ppt_parser.add_argument(
-            "--max-slides",
-            "-ms",
-            type=int,
-            default=20,
-            help="Maximum number of slides to extract (default: 20).",
-        )
-        ppt_parser.add_argument(
-            "--no-deduplicate",
-            action="store_true",
-            default=False,
-            help="Disable duplicate slide removal (default: deduplication enabled).",
-        )
-        ppt_parser.add_argument(
-            "--similarity-threshold",
-            "-sim",
-            type=float,
-            default=0.85,
-            help="Text similarity threshold for deduplication, 0.0-1.0 (default: 0.85).",
-        )
-        ppt_parser.add_argument(
-            "--dedup-method",
-            choices=["image", "text", "both"],
-            default="both",
-            help="Deduplication method: image (SSIM), text (content), or both (default: both).",
-        )
-        ppt_parser.add_argument(
-            "--ssim-threshold",
-            type=float,
-            default=0.98,
-            help="SSIM threshold for image deduplication, 0.0-1.0 (default: 0.98).",
-        )
-        ppt_parser.add_argument(
-            "--hist-threshold",
-            type=float,
-            default=0.15,
-            help="Histogram correlation threshold for image deduplication pre-filter, 0.0-1.0 (default: 0.15).",
-        )
-        ppt_parser.add_argument(
-            "--cropped-slide",
-            nargs="?",
-            const="auto",
-            default=None,
-            help="Enable cropped slide method. No value = auto-detect ROI with RTDETR, "
-            "or provide manual ROI coordinates as 'x0,y0,x1,y1'",
-        )
-        ppt_parser.add_argument(
-            "--ppt",
-            type=str,
-            default="",
-            help="Path to PPT, PDF, image, or OpenDocument file for PPT method",
-        )
-        ppt_parser.add_argument(
-            "--no-ocr",
-            action="store_true",
-            default=False,
-            help="Skip OCR, embed slide images as base64 instead",
-        )
-        ppt_parser.add_argument(
-            "--no-clean",
-            action="store_true",
-            default=False,
-            help="Keep timestamps and image references in final output",
-        )
-        ppt_parser.add_argument(
-            "--style",
-            choices=["rewrite", "academic", "zh-speaker"],
-            default="rewrite",
-            help="Rewrite style: rewrite (default), academic, or zh-speaker (Chinese with speaker diarization)",
-        )
-        # ponytail: PPT flow still threads transcribe_model to ppt_slide/cropped_slide
-        # helpers (out of scope for the ASR unification); keep a PPT-local flag.
-        ppt_parser.add_argument(
-            "--transcribe-model",
-            "-tsm",
-            default="large-v3-turbo",
-            choices=[
-                "tiny", "base", "small", "medium",
-                "large-v1", "large-v2", "large-v3", "large-v3-turbo", "turbo",
-            ],
-            help="Whisper model size for the PPT speech path (default: large-v3-turbo)",
-        )
-        ppt_parser.set_defaults(func=handle_ppt_command)
-
         print("Debug: About to parse arguments...")
         args = parser.parse_args()
 
@@ -2223,7 +2057,7 @@ def main():
 
     # Main command (direct file processing)
     parser = argparse.ArgumentParser(
-        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), translate (tr), en-zh (enzh), en-en (enen), zh-zh (zhzh), speaker (sp), ppt (p)\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
+        description="wenbi: Convert video, audio, URL, or subtitle files to CSV and Markdown outputs.\n\nAvailable subcommands: rewrite (rw), en-zh (enzh), en-en (enen), zh-zh (zhzh), speaker (sp)\nAll subcommands accept --ppt / -p for optional slide-combine.\nUse 'wenbi <subcommand> --help' for subcommand-specific help."
     )
     parser.add_argument(
         "input", nargs="?", default="", help="Path to input file or URL"
