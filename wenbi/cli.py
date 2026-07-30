@@ -691,6 +691,18 @@ def add_global_args(subparser):
         "--config", "-c", default="", help="Path to YAML configuration file"
     )
     subparser.add_argument(
+        "--verbose", "-v", action="store_true", default=False, help="Enable verbose logging"
+    )
+    subparser.add_argument(
+        "--start_time", "-st", default="", help="Start time for extraction (format: HH:MM:SS)"
+    )
+    subparser.add_argument(
+        "--end_time", "-et", default="", help="End time for extraction (format: HH:MM:SS)"
+    )
+    subparser.add_argument(
+        "--deepl-key", default="", help="DeepL API key (uses DEEPL_API_KEY env var if not provided)"
+    )
+    subparser.add_argument(
         "--output-dir", "-o", default="", help="Output directory (optional)"
     )
     subparser.add_argument("--llm", default="", help="LLM model identifier (optional)")
@@ -2064,6 +2076,9 @@ def main():
     )
     parser.add_argument(
         "--config", "-c", default="", help="Path to YAML configuration file"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", default=False, help="Enable verbose logging"
     )
     parser.add_argument(
         "--output-dir", "-o", default="", help="Output directory (optional)"
