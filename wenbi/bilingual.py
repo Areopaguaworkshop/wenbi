@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -203,9 +204,10 @@ def write_bilingual_markdown(
     parts: list[str] = []
     for english, translation in zip(paragraphs, translations):
         english_text = english.strip() if isinstance(english, str) else str(english).strip()
+        translation_text = translation.strip() if isinstance(translation, str) else str(translation or "").strip()
         parts.append(
             f"**[English]**\n{english_text}\n\n"
-            f"**[中文]**\n{translation.strip()}"
+            f"**[中文]**\n{translation_text}"
         )
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -300,9 +302,19 @@ def translate_chunks(
                 logger.warning(f"Failed to translate chunk {index}: {e}")
                 translated_text = f"[Translation Error: {chunk}]"
 
+        # dspy.Predict can return None without raising — guard against that
+        if translated_text is None or (isinstance(translated_text, str) and not translated_text.strip()):
+            logger.warning(f"Empty translation for chunk {index}, using original text")
+            translated_text = f"[Translation Error: {chunk}]"
+
         translations.append(translated_text)
 
     return translations
+
+
+def _strip_topic_segment_markers(text: str) -> str:
+    """Remove internal segment markers from topic-grouping output."""
+    return re.sub(r"(?m)^\s*\[\d+\]\s*", "", text)
 
 
 def group_into_topics(
@@ -318,6 +330,40 @@ def group_into_topics(
     Preserves 100% of original text — only groups adjacent segments by topic
     and marks paragraph breaks with '---'.
     """
+    # Build the transcript input with segment markers
+    indexed_lines: list[str] = []
+    for i, seg in enumerate(segments, 1):
+        indexed_lines.append(f"[{i}] {str(seg.get('text') or '').strip()}")
+    transcript_text = "\n".join(indexed_lines)
+
+    if verbose:
+        logger.debug("Grouping %d segments into topic paragraphs", len(segments))
+
+    if len(transcript_text) > 60_000:
+        # ponytail: size-based chunks preserve every segment; replace with validated
+        # batch topic grouping if an LLM round-trip can be proved lossless.
+        paragraphs: list[str] = []
+        current: list[str] = []
+        current_size = 0
+        for segment in segments:
+            text = str(segment.get("text") or "").strip()
+            if not text:
+                continue
+            if current and current_size + len(text) + 1 > 6_000:
+                paragraphs.append(" ".join(current))
+                current = []
+                current_size = 0
+            current.append(text)
+            current_size += len(text) + (1 if current_size else 0)
+        if current:
+            paragraphs.append(" ".join(current))
+        if verbose:
+            logger.warning(
+                "Transcript is too large for lossless topic grouping; using %d size-based paragraphs",
+                len(paragraphs),
+            )
+        return paragraphs
+
     from wenbi.model import _import_dspy, configure_lm
 
     configure_lm(
@@ -340,18 +386,10 @@ def group_into_topics(
         transcript = dspy.InputField(
             desc="Segmented transcript with numbered segment markers"
         )
+
         grouped = dspy.OutputField(
             desc="Topic-grouped paragraphs using same text, paragraph breaks marked with ---"
         )
-
-    # Build the transcript input with segment markers
-    indexed_lines: list[str] = []
-    for i, seg in enumerate(segments, 1):
-        indexed_lines.append(f"[{i}] {str(seg.get('text') or '').strip()}")
-    transcript_text = "\n".join(indexed_lines)
-
-    if verbose:
-        logger.debug("Grouping %d segments into topic paragraphs", len(segments))
 
     module = dspy.Predict(TopicGroupSignature)
     result = module(transcript=transcript_text)
@@ -360,7 +398,11 @@ def group_into_topics(
         logger.debug("Topic grouping complete")
 
     # Split on '---' to get topic paragraphs
-    paragraphs = [p.strip() for p in result.grouped.split("---") if p.strip()]
+    paragraphs = [
+        _strip_topic_segment_markers(paragraph).strip()
+        for paragraph in result.grouped.split("---")
+        if paragraph.strip()
+    ]
     return paragraphs
 
 
@@ -372,12 +414,7 @@ def rewrite_english(
     temperature: float = 0.1,
     verbose: bool = False,
 ) -> list[str]:
-    """Remove oral fillers and fix grammar conservatively via LLM.
-
-    Removes: um, uh, you know, like (filler), false starts, obvious fragments.
-    Fixes: grammar, unify broken sentences.
-    Keeps 97% original wording — does NOT restructure or rephrase.
-    """
+    """Turn spoken English into a faithful, readable edited transcript."""
     from wenbi.model import _import_dspy, configure_lm
 
     configure_lm(
@@ -389,28 +426,43 @@ def rewrite_english(
     )
     dspy = _import_dspy()
 
-    class CleanEnglishSignature(dspy.Signature):
-        """Remove oral fillers and fix grammar. Keep 97% original wording.
+    class EditedEnglishTranscriptSignature(dspy.Signature):
+        """Edit spoken English into a readable written transcript, not an essay.
 
-        Remove: um, uh, you know, like (as filler), false starts, obvious fragments.
-        Fix: grammar, unify broken sentences.
-        Do NOT restructure or rephrase. Preserve the original voice and style.
+        Preserve every claim, argument, qualification, chronology, quotation,
+        proper name, technical term, date, number, and intentional repetition.
+        Keep hedges such as "I think", "perhaps", and "it seems" when they
+        express the speaker's degree of certainty. Preserve speaker labels and
+        their order exactly when they occur in the input.
+
+        Remove only semantically empty fillers (for example "um", "uh", and
+        "you know"), immediate accidental repetitions, abandoned false starts,
+        and discourse-only openers such as "well", "okay", "right", or "so"
+        when they do not express a logical relation. Repair punctuation and
+        grammar, and combine fragments only when the meaning is unambiguous.
+        Do not summarize, reorder, explain, strengthen, weaken,
+        add facts, or guess at uncertain ASR wording. Do not emit timestamps,
+        internal segment IDs such as "[307]", headings, commentary, or notes.
+
+        Return only the edited transcript.
         """
 
-        english_text = dspy.InputField(desc="Raw English transcript paragraph")
-        cleaned = dspy.OutputField(
-            desc="Cleaned English preserving 97% original wording"
+        spoken_english_transcript: str = dspy.InputField(
+            desc="One or more consecutive raw English ASR transcript turns"
+        )
+        written_transcript: str = dspy.OutputField(
+            desc="Faithful edited transcript with source speaker labels retained when present"
         )
 
-    module = dspy.Predict(CleanEnglishSignature)
+    module = dspy.Predict(EditedEnglishTranscriptSignature)
 
     rewritten: list[str] = []
     for i, paragraph in enumerate(paragraphs, 1):
         if verbose:
             logger.debug("Rewriting paragraph %d/%d", i, len(paragraphs))
         try:
-            result = module(english_text=paragraph)
-            rewritten.append(result.cleaned.strip())
+            result = module(spoken_english_transcript=paragraph)
+            rewritten.append(result.written_transcript.strip())
         except Exception as e:
             logger.warning("Rewrite failed for paragraph %d: %s", i, e)
             rewritten.append(paragraph)
@@ -607,6 +659,7 @@ def process_en_zh(
     timeout: int = 3600,
     temperature: float = 0.1,
     deepl_key: str | None = None,
+    use_deepl: bool = True,
     gladia_key: str | None = None,
     speaker_labels: bool = True,
     save_json: bool = False,
@@ -738,6 +791,7 @@ def process_en_zh(
         timeout=timeout,
         temperature=temperature,
         deepl_key=deepl_key,
+        use_deepl=use_deepl,
         use_glossary=use_glossary,
         glossary_file=glossary_file,
         verbose=verbose,
@@ -857,6 +911,7 @@ def process_speaker(
     timeout: int = 3600,
     temperature: float = 0.1,
     deepl_key: str | None = None,
+    use_deepl: bool = True,
     gladia_key: str | None = None,
     speaker_labels: bool = True,
     speaker_count: int | None = None,
@@ -1068,6 +1123,7 @@ def process_speaker(
             timeout=timeout,
             temperature=temperature,
             deepl_key=deepl_key,
+            use_deepl=use_deepl,
             use_glossary=use_glossary,
             glossary_file=glossary_file,
             verbose=verbose,

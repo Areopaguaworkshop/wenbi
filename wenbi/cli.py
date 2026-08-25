@@ -8,7 +8,7 @@ import yaml
 
 from wenbi.download import download_all
 from wenbi.main import process_input
-from wenbi.model import rewrite, translate
+from wenbi.model import resolve_translation_engine, rewrite, translate
 from wenbi.ppt_slide import combine_speech_and_slides_by_timestamp
 
 
@@ -392,6 +392,8 @@ def handle_en_zh_command(args):
 
     from wenbi.bilingual import process_en_zh
 
+    llm, use_deepl = resolve_translation_engine(args.translation_engine, args.llm)
+
     try:
         result = process_en_zh(
             input_path=args.input,
@@ -402,12 +404,13 @@ def handle_en_zh_command(args):
             source_lang=args.source_lang,
             interpreter_lang=args.interpreter_lang,
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/glm-5.2:cloud",
+            llm=llm,
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
             temperature=args.temperature,
             deepl_key=args.deepl_key,
+            use_deepl=use_deepl,
             gladia_key=args.gladia_key,
             speaker_labels=args.speaker_labels,
             save_json=args.save_json,
@@ -469,6 +472,8 @@ def handle_speaker_command(args):
 
     from wenbi.bilingual import process_speaker
 
+    llm, use_deepl = resolve_translation_engine(args.translation_engine, args.llm)
+
     try:
         result = process_speaker(
             input_path=args.input,
@@ -478,12 +483,13 @@ def handle_speaker_command(args):
             asr_provider=args.asr_provider,
             source_lang=args.source_lang,
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/glm-5.2:cloud",
+            llm=llm,
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
             temperature=args.temperature,
             deepl_key=args.deepl_key,
+            use_deepl=use_deepl,
             gladia_key=args.gladia_key,
             speaker_labels=args.speaker_labels,
             speaker_count=getattr(args, "speaker_count", None),
@@ -514,11 +520,13 @@ def handle_speaker_command(args):
 
     # Stage 6: slide-combine (optional, gated by --ppt)
     # Timestamps recovered from VTT via fuzzy matching (rapidfuzz).
+    # Prefer bilingual_md when available, fall back to rewritten_md.
     if getattr(args, "ppt", None) is not None and result.rewritten_md:
         output_dir = args.output_dir or os.getcwd()
         base_name = os.path.splitext(os.path.basename(args.input))[0]
+        speech_source = result.bilingual_md or result.rewritten_md
         try:
-            with open(result.rewritten_md, "r", encoding="utf-8") as f:
+            with open(speech_source, "r", encoding="utf-8") as f:
                 speech_md = f.read()
             combine_md, combine_clean_md = finalize_with_slides(
                 args, speech_md, args.input, output_dir, base_name, logger, args.verbose,
@@ -619,6 +627,8 @@ def handle_en_en_command(args):
 
     from wenbi.bilingual import process_speaker
 
+    llm, use_deepl = resolve_translation_engine(args.translation_engine, args.llm)
+
     try:
         result = process_speaker(
             input_path=args.input,
@@ -628,12 +638,13 @@ def handle_en_en_command(args):
             asr_provider=args.asr_provider,
             source_lang="en",
             target_language=args.lang or "Chinese",
-            llm=args.llm or "ollama/glm-5.2:cloud",
+            llm=llm,
             chunk_length=args.chunk_length,
             max_tokens=args.max_tokens,
             timeout=args.timeout,
             temperature=args.temperature,
             deepl_key=args.deepl_key,
+            use_deepl=use_deepl,
             gladia_key=args.gladia_key,
             speaker_labels=args.speaker_labels,
             speaker_count=args.speaker_count,
@@ -706,6 +717,12 @@ def add_global_args(subparser):
         "--output-dir", "-o", default="", help="Output directory (optional)"
     )
     subparser.add_argument("--llm", default="", help="LLM model identifier (optional)")
+    subparser.add_argument(
+        "--translation-engine",
+        choices=["auto", "deepl", "ollama", "openai"],
+        default="auto",
+        help="Translation engine: auto (DeepL then LLM), deepl, ollama, or openai (GPT-5.6-terra; requires OPENAI_API_KEY)",
+    )
     subparser.add_argument("--lang", "-l", default="", help="Target language")
     subparser.add_argument(
         "--chunk-length",
@@ -838,6 +855,14 @@ def add_slide_args(subparser):
         default=False,
         help="Skip OCR on slide images, embed them as base64 instead (TYPE 3 only; TYPE 1 never OCRs).",
     )
+    subparser.add_argument(
+        "--no-slide-crop",
+        action="store_true",
+        default=False,
+        help="Disable automatic slide-region detection + cropping of video frames "
+             "before slide-combine. By default --ppt crops each deduplicated frame to "
+             "the detected projected-slide rectangle (YOLO11n/Paddle/heuristic).",
+    )
 
 
 def finalize_with_slides(args, audio_markdown, video_path, output_dir, base_name,
@@ -905,6 +930,19 @@ def finalize_with_slides(args, audio_markdown, video_path, output_dir, base_name
         logger=logger,
         verbose=verbose,
     )
+
+    # Stage 6.5: slide-region crop (per-frame) — automatic unless --no-slide-crop
+    if not getattr(args, "no_slide_crop", False):
+        from wenbi.ppt_slide import crop_slides_region
+        if verbose:
+            logger.debug("--ppt: cropping slide region from frames...")
+        deduplicated_frames = crop_slides_region(
+            deduplicated_frames=deduplicated_frames,
+            output_dir=output_dir,
+            base_name=base_name,
+            logger=logger,
+            verbose=verbose,
+        )
 
     if verbose:
         logger.debug(

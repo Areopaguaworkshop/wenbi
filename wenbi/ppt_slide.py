@@ -101,6 +101,196 @@ def load_and_convert_pdf(ppt_pdf_path, output_dir, logger, verbose):
         raise SystemExit(1)
 
 
+def _detect_yolo11n(frame_path, logger, verbose):
+    """YOLO11n via ultralytics, CPU-only. Returns (x0,y0,x1,y1) or None.
+    Lazy-imports ultralytics. Auto-downloads yolo11n.pt on first call.
+    Filters COCO classes 62 (tv) + 63 (laptop), conf>=0.25, largest box."""
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        if verbose:
+            logger.debug("slide-crop: ultralytics not installed, skipping YOLO11n")
+        return None
+    try:
+        model = YOLO("yolo11n.pt")
+        results = model(frame_path, device="cpu", classes=[62, 63], verbose=False)
+        if not results or not results[0].boxes or len(results[0].boxes) == 0:
+            return None
+        boxes = results[0].boxes.xyxy.cpu().numpy()
+        confs = results[0].boxes.conf.cpu().numpy()
+        # filter conf >= 0.25, pick largest area
+        best = None
+        best_area = 0
+        for (x0, y0, x1, y1), c in zip(boxes, confs):
+            if c < 0.25:
+                continue
+            area = (x1 - x0) * (y1 - y0)
+            if area > best_area:
+                best_area = area
+                best = (int(x0), int(y0), int(x1), int(y1))
+        if verbose and best:
+            logger.debug(f"slide-crop: YOLO11n found box {best} (conf filter, area={best_area:.0f})")
+        return best
+    except Exception as e:
+        if verbose:
+            logger.debug(f"slide-crop: YOLO11n failed: {e}")
+        return None
+
+
+def _detect_paddle(frame_path, logger, verbose):
+    """PaddleDetection PP-YOLOE, CPU-only. Returns (x0,y0,x1,y1) or None.
+    Lazy-imports. Only used as secondary fallback when YOLO11n unavailable.
+    NOTE: PaddleDetection's python infer API requires a model dir; this is a
+    best-effort path. If paddlepaddle/paddledet not importable, return None."""
+    try:
+        import paddle
+        # ponytail: PaddleDetection needs a model dir + deploy.python.infer;
+        # without a configured model dir this path returns None gracefully.
+        # Users wanting Paddle fallback must set WENBI_PADDLE_MODEL_DIR env var.
+        model_dir = os.environ.get("WENBI_PADDLE_MODEL_DIR")
+        if not model_dir or not os.path.isdir(model_dir):
+            return None
+        import sys
+        if model_dir not in sys.path:
+            sys.path.insert(0, model_dir)
+        from deploy.python.infer import Detector
+        detector = Detector(
+            model_dir=model_dir, device="CPU", run_mode="paddle", cpu_threads=4
+        )
+        results = detector.predict_image([frame_path], visual=False)
+        # filter classes 62 (tv) + 63 (laptop) — PaddleDetection COCO ids match
+        best = None
+        best_area = 0
+        for item in (results or []):
+            boxes = item.get("boxes", item.get("bbox", []))
+            classes = item.get("classes", item.get("category_id", []))
+            for box, cls in zip(boxes, classes):
+                if int(cls) not in (62, 63):
+                    continue
+                x0, y0, x1, y1 = [int(v) for v in box[:4]]
+                area = (x1 - x0) * (y1 - y0)
+                if area > best_area:
+                    best_area = area
+                    best = (x0, y0, x1, y1)
+        if verbose and best:
+            logger.debug(f"slide-crop: PaddleDetection found box {best}")
+        return best
+    except Exception as e:
+        if verbose:
+            logger.debug(f"slide-crop: PaddleDetection failed: {e}")
+        return None
+
+
+def _detect_heuristic(frame_path, logger, verbose):
+    """Largest-bright-rectangle heuristic. cv2-only, zero deps. Always available.
+    Returns (x0,y0,x1,y1) or None."""
+    try:
+        img = cv2.imread(frame_path)
+        if img is None:
+            return None
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+        # Otsu threshold to isolate bright slide region
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best = None
+        best_area = 0
+        min_area = 0.10 * h * w  # at least 10% of frame
+        for c in contours:
+            x0, y0, cw, ch = cv2.boundingRect(c)
+            area = cw * ch
+            if area < min_area:
+                continue
+            aspect = cw / max(ch, 1)
+            if aspect < 1.2:  # slides wider than tall; skip the lecturer square
+                continue
+            if area > best_area:
+                best_area = area
+                best = (x0, y0, x0 + cw, y0 + ch)
+        if verbose and best:
+            logger.debug(f"slide-crop: heuristic found box {best} (area={best_area:.0f})")
+        return best
+    except Exception as e:
+        if verbose:
+            logger.debug(f"slide-crop: heuristic failed: {e}")
+        return None
+
+
+def detect_slide_region(frame_path, logger, verbose):
+    """Detect the projected-slide rectangle in one frame.
+    Engine chain: YOLO11n (primary) -> PaddleDetection (secondary) -> heuristic (fallback).
+    Returns (x0, y0, x1, y1) or None (=> use full frame)."""
+    box = _detect_yolo11n(frame_path, logger, verbose)
+    if box is None:
+        box = _detect_paddle(frame_path, logger, verbose)
+    if box is None:
+        box = _detect_heuristic(frame_path, logger, verbose)
+    return box
+
+
+def crop_slides_region(deduplicated_frames, output_dir, base_name, logger, verbose):
+    """Crop the slide region out of each deduplicated frame.
+    Returns a NEW list of frame dicts with same shape:
+        {"frame_path": <cropped_path_or_original>, "timestamp": str, "original_frame_path": str}
+    Cropped images saved to output_dir/<base_name>_cropped/.
+    Frames where detection fails keep their original frame_path."""
+    crop_dir = os.path.join(output_dir, f"{base_name}_cropped")
+    os.makedirs(crop_dir, exist_ok=True)
+
+    cropped_frames = []
+    cropped_count = 0
+    for frame_data in deduplicated_frames:
+        ts = frame_data["timestamp"]
+        src = frame_data["frame_path"]
+        box = detect_slide_region(src, logger, verbose)
+
+        if box is None:
+            if verbose:
+                logger.debug(f"slide-crop: {ts}: no box, using full frame")
+            cropped_frames.append({
+                "frame_path": src,
+                "timestamp": ts,
+                "original_frame_path": src,
+            })
+            continue
+
+        x0, y0, x1, y1 = box
+        try:
+            img = cv2.imread(src)
+            if img is None:
+                if verbose:
+                    logger.debug(f"slide-crop: {ts}: cannot reread, using full frame")
+                cropped_frames.append({
+                    "frame_path": src,
+                    "timestamp": ts,
+                    "original_frame_path": src,
+                })
+                continue
+            cropped = img[y0:y1, x0:x1]
+            out_name = f"crop_{os.path.splitext(os.path.basename(src))[0]}.png"
+            out_path = os.path.join(crop_dir, out_name)
+            cv2.imwrite(out_path, cropped)
+            cropped_count += 1
+            if verbose:
+                logger.debug(f"slide-crop: {ts}: cropped to {out_path} ({x1-x0}x{y1-y0})")
+            cropped_frames.append({
+                "frame_path": out_path,
+                "timestamp": ts,
+                "original_frame_path": src,
+            })
+        except Exception as e:
+            if verbose:
+                logger.debug(f"slide-crop: {ts}: crop failed {e}, using full frame")
+            cropped_frames.append({
+                "frame_path": src,
+                "timestamp": ts,
+                "original_frame_path": src,
+            })
+
+    logger.debug(f"slide-crop: cropped {cropped_count}/{len(deduplicated_frames)} frames")
+    return cropped_frames
+
+
 def process_images_as_slides(ppt_path, deduplicated_frames, output_dir, no_ocr, base_name, cite_timestamps, logger, verbose):
     """
     Process image files directly as slides.

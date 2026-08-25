@@ -8,6 +8,22 @@ except ImportError:
 from wenbi.utils import segment
 
 
+DEFAULT_LLM = "ollama/glm-5.2:cloud"
+DEFAULT_OPENAI_LLM = "openai/gpt-5.6-terra"
+
+
+def resolve_translation_engine(engine: str = "auto", llm: str = "") -> tuple[str, bool]:
+    """Return the LLM and whether translations should use DeepL first."""
+    engine = (engine or "auto").lower()
+    if engine not in {"auto", "deepl", "ollama", "openai"}:
+        raise ValueError(f"Unknown translation engine: {engine}")
+    if engine == "openai":
+        return llm or DEFAULT_OPENAI_LLM, False
+    if engine == "ollama":
+        return llm or DEFAULT_LLM, False
+    return llm or DEFAULT_LLM, True
+
+
 def _import_dspy():
     """Import dspy lazily so DeepL-first flows don't fail at module import time."""
     try:
@@ -28,7 +44,7 @@ def configure_lm(model_string, verbose=False, **kwargs):
     dspy = _import_dspy()
 
     if not model_string:
-        model_string = "ollama/glm-5.2:cloud"
+        model_string = DEFAULT_LLM
 
     if verbose:
         logger.debug(f"Configuring LLM: {model_string}")
@@ -66,15 +82,11 @@ def configure_lm(model_string, verbose=False, **kwargs):
             logger.debug(f"Ollama configuration: {config}")
         lm = dspy.LM(**config)
     elif provider == "openai":
-        config.update(
-            {
-                "api_base": "https://api.openai.com/v1",
-                "model": model_string,
-            }
-        )
+        from wenbi.llm.openai import get_openai_lm
+
         if verbose:
-            logger.debug(f"OpenAI configuration: {config}")
-        lm = dspy.LM(**config)
+            logger.debug(f"OpenAI configuration: model={model_string}")
+        lm = get_openai_lm(model_name=model_string, **config)
     elif provider == "gemini":
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY_JSON")
         if not api_key:
@@ -600,11 +612,7 @@ def academic(
             continue
 
         if verbose:
-            logger.debug(
-                f"Converting chunk {i}/{len(chunks)} to academic style ({
-                    len(chunk)
-                } characters)"
-            )
+            logger.debug(f"Converting chunk {i}/{len(chunks)} to academic style ({len(chunk)} characters)")
 
         try:
             # Skip timestamp headers when cite_timestamps is True

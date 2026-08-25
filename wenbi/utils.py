@@ -625,10 +625,19 @@ def download_audio(url, output_dir=None, timestamp=None, output_wav=None, verbos
         verbose (bool): Enable verbose logging
     """
     logger = logging.getLogger(__name__)
-    
+
+    # ponytail: yt-dlp silently fuzzy-matches a malformed YouTube URL to the
+    # wrong video (no error). Fail loud when the v= param is clearly broken by
+    # shell/markdown backslash-escapes. Upgrade path: a real URL parser + allowlist
+    # if non-YouTube providers start hitting the same trap.
+    if "youtube.com" in url and ("\\" in url or not re.search(r"[?&]v=[\w-]{6,}", url)):
+        raise ValueError(
+            f"Malformed YouTube URL (no clean ?v= param, possible backslash-escape): {url!r}"
+        )
+
     if verbose:
         logger.debug(f"Starting audio download from URL: {url}")
-    
+
     import subprocess
     
     if output_dir is None:
@@ -837,7 +846,13 @@ def download_video(url, output_dir=None, verbose=False):
         str: Path to the downloaded video file
     """
     logger = logging.getLogger(__name__)
-    
+
+    # ponytail: see download_audio — yt-dlp fuzzy-matches malformed URLs silently.
+    if "youtube.com" in url and ("\\" in url or not re.search(r"[?&]v=[\w-]{6,}", url)):
+        raise ValueError(
+            f"Malformed YouTube URL (no clean ?v= param, possible backslash-escape): {url!r}"
+        )
+
     if verbose:
         logger.debug(f"Starting video download from URL: {url}")
     
@@ -1054,6 +1069,15 @@ def extract_audio_segment(audio_path, timestamp=None, output_dir=None, output_wa
         output_dir = os.path.dirname(audio_path)
     
     base_name = os.path.splitext(os.path.basename(audio_path))[0]
+    
+    # ponytail: callers may pass start/end as strings (cli.py:83 returns
+    # .strip()'d argv); coerce to float so the arithmetic + ffmpeg -ss/-to below
+    # work regardless of input type.
+    if timestamp:
+        timestamp = {
+            "start": float(timestamp["start"]),
+            "end": float(timestamp["end"]),
+        }
     
     # Determine output filename
     if output_wav:

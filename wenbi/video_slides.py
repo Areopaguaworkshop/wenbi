@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from scenedetect import ContentDetector, SceneManager, VideoManager
+from scenedetect import ContentDetector, SceneManager, open_video
 
 # Import scikit-image for SSIM calculation
 try:
@@ -700,20 +700,8 @@ def detect_slide_changes(
     # Compute min_scene_len in frames for ContentDetector
     min_scene_frames = max(1, int(min_scene_seconds * fps))
 
-    video_manager = VideoManager([video_path])
-    # set_downscale_factor expected to speed detection (1 no downscale, 2 half, etc.)
-    try:
-        # Ensure downscale is a positive number
-        if downscale and downscale > 0:
-            video_manager.set_downscale_factor(downscale)
-    except Exception:
-        # Some versions accept different APIs; ignore if not supported
-        if verbose and logger:
-            logger.debug(
-                "Warning: set_downscale_factor may not be supported by this VideoManager"
-            )
-
-    video_manager.start()
+    # scenedetect 0.7+ replaced VideoManager with open_video() returning a VideoStream
+    video_manager = open_video(video_path)
 
     scene_manager = SceneManager()
     detector = ContentDetector(
@@ -761,7 +749,11 @@ def detect_slide_changes(
         raise
     finally:
         try:
-            video_manager.release()
+            # scenedetect 0.7+ VideoStream uses reset() instead of release()
+            if hasattr(video_manager, "release"):
+                video_manager.release()
+            elif hasattr(video_manager, "reset"):
+                video_manager.reset()
         except Exception:
             pass
 

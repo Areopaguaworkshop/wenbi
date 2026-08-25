@@ -249,8 +249,13 @@ PATRISTIC_GLOSSARY = {
     "diadochos of photiki": "圣希亚多",
     "ignatius of antioch": "安提阿的伊格纳丢",
     "polycarp": "波利卡普",
-    "aimilianos": "艾米里亚诺斯",
-    "elder aimilianos": "艾米里亚诺斯长老",
+    "aimilianos": "艾米利安",
+    "elder aimilianos": "艾米利安长老",
+    # YouTube auto-transcript misheard variants (same person: Elder Aimilianos of Simonopetra)
+    "emilianos": "艾米利安",
+    "emilionos": "艾米利安",
+    "emiliano": "艾米利安",
+    "emilio nos": "艾米利安",
     "nicophoros": "尼克弗罗",
     "st nicophoros": "圣尼克弗罗",
     "lorenzo scupoli": "洛伦佐·斯库波利",
@@ -260,6 +265,24 @@ PATRISTIC_GLOSSARY = {
     "st augustine": "圣奥古斯丁",
     "augustine": "奥古斯丁",
     "aristotle": "亚里士多德",
+
+    # === Western / Roman saints (from Aug. 10 Laurence hagiography) ===
+    "laurence": "劳伦斯",
+    "st laurence": "圣劳伦斯",
+    "saint laurence": "圣劳伦斯",
+    "lawrence": "劳伦斯",
+    "st lawrence": "圣劳伦斯",
+    "archdeacon": "总执事",
+    "sixtus": "西斯笃",
+    "pope sixtus": "教宗西斯笃",
+    "st sixtus": "圣西斯笃",
+    "valerian": "瓦勒良",
+    "prefect": "总督",
+    "sacred vessels": "圣器",
+    "scorpions": "蝎尾鞭",
+    "scorpion": "蝎尾鞭",
+    "gridiron": "铁栅",
+    "iron grill": "铁栅",
 
     # === Theotokos & Marian terms ===
     "theotokos": "诞神女",
@@ -691,7 +714,7 @@ PATRISTIC_GLOSSARY = {
     "trisagion": "三圣颂",
     "cherubikon": "天使之歌",
     "anaphora": "圣祭礼仪",
-    "prokeimenon": "进堂颂",
+    "prokeimenon": "先导颂",
     "alleluia": "阿肋路亚",
     "koinonikon": "领主颂",
     "troparion": "短颂",
@@ -806,6 +829,109 @@ PATRISTIC_GLOSSARY = {
     "pneumatology": "圣灵论",
     "mystagogy": "密仪",
     "mystical theology": "密意神学",
+
+    # === Recent GCDFL / CTCFOL additions: names, places, works, and specialist terms ===
+    # Patristic, Syriac, and modern Christian-study names
+    "ephrem": "叙利亚的圣艾弗冷",
+    "aphrahat": "阿弗哈特",
+    "theodore of mopsuestia": "摩普绥提亚的狄奥多",
+    "bardaisan": "巴代桑",
+    "narsai": "纳尔赛",
+    "simeon stylites": "石柱西蒙",
+    "symeon the holy fool": "圣愚西蒙",
+    "macrina": "玛卡瑞娜",
+    "ambrose": "安波罗修",
+    "tertullian": "德尔图良",
+    "cyprian": "居普良",
+    "hilary of poitiers": "普瓦捷的希拉里",
+    "john cassian": "卡西安",
+    "john solheid": "索尔海德",
+    "sebastian brock": "塞巴斯蒂安·布洛克",
+    "edmund beck": "埃德蒙德·贝克",
+    "kallistos ware": "卡里斯托·维尔",
+    "callistos ware": "卡里斯托·维尔",
+
+    # Syriac and late-antique places and regions
+    "mesopotamia": "美索不达米亚",
+    "syria": "叙利亚",
+    "persia": "波斯",
+    "iraq": "伊拉克",
+    "turkey": "土耳其",
+    "ctesiphon": "泰锡封",
+    "seleucia": "塞琉西亚",
+    "tur abdin": "图尔阿卜丁",
+    "mardin": "马尔丁",
+
+    # Named Christian and patristic works
+    "hymns on paradise": "天堂之歌",
+    "hymns of faith": "信心之歌",
+    "book of steps": "步书",
+    "liber graduum": "步书",
+    "demonstrations": "论证集",
+    "odes of solomon": "所罗门诗歌",
+    "acts of thomas": "多马行传",
+    "city of god": "上帝之城",
+    "on the trinity": "论三位一体",
+    "confessions": "忏悔录",
+    "on free will": "论自由意志",
+    "longer rules": "长会规",
+
+    # Theological, liturgical, and spiritual-study terms
+    "apokatastasis": "万物复兴",
+    "anagogy": "灵意阐释",
+    "antiochene christology": "安提阿派基督论",
+    "filioque": "和子句",
+    "hesychast controversy": "静修之争",
+    "coenobium": "共住修道院",
+    "eremitic": "隐修的",
+    "antiphon": "对唱圣咏",
+    "diptych": "双联画",
+    "lectionary": "诵经集",
+    "madrasha": "律诗",
+
+    # Vespers order (黄昏礼-附和合本诗篇-颂唱省略-08-10补充修订用.docx)
+    "octoechos": "八调集",
+    "plagal tone": "辅调",
+    "menaion": "月颂集",
+    "apolytikion": "遣散词",
+    "apolytikia": "遣散词",
+    "opening psalm": "开篇圣咏",
+    "lamp-lighting prayers": "灯台祷文",
+    "great litany": "平安连祷",
+    "litany of supplication": "恳求连祷",
+    "o gladsome light": "禧光颂",
+    "phos hilaron": "禧光颂",
+    "evening prokeimenon": "黄昏先导颂",
+    "song of simeon": "西缅之歌",
+    "nunc dimittis": "西缅之歌",
+    "stichos": "节",
+    "deacon": "辅祭",
+    "choir": "唱诗班",
+    "proestos": "主礼",
+    "holy table": "圣祭台",
+    "ever-virgin": "永贞童女",
+    "cyril of alexandria": "亚历山大的圣西里尔",
+    "prooimiakos psalm": "开篇圣咏",
+    "lucernarion": "灯台礼",
+    "lychnikon": "灯台祷文",
+    "eirenika": "平安连祷",
+    "great ektenia": "平安连祷",
+    "litany of peace": "平安连祷",
+    "plerotika": "恳求连祷",
+    "ektenia": "连祷",
+    "ektenes litany": "恳切连祷",
+    "vesperal entrance": "黄昏入堂",
+    "eisodos": "入堂",
+    "priestly exclamation": "高声祷词",
+    "ekphonesis": "高声祷词",
+    "dismissal": "遣散礼",
+    "apolysis": "遣散礼",
+    "liturgical reader": "宣读者",
+    "kyrie eleison": "求主怜悯",
+    "lord i have cried": "主啊，我呼求你",
+    "vesperal sacrifice": "晚祭",
+    "incense offering": "香祭",
+    "god-receiver": "上帝接纳者",
 }
 
 
@@ -815,6 +941,30 @@ def get_glossary_for_dspy():
     for en, zh in sorted(PATRISTIC_GLOSSARY.items()):
         pairs.append(f"{en}={zh}")
     return "; ".join(pairs)
+
+
+def get_relevant_glossary_terms(en_text, min_len=3):
+    """Return glossary entries whose EN term appears in en_text (case-insensitive,
+    plural-aware). Used to pass only relevant terms to the DSPy signature, keeping
+    token cost low while ensuring the LLM sees correct ZH for names/terms in context.
+
+    Returns a formatted string like "monk=修士; monastery=修院" or "" if no matches.
+    """
+    import re as _re
+
+    matches = []
+    for en_term, zh_term in sorted(PATRISTIC_GLOSSARY.items(), key=lambda kv: len(kv[0]), reverse=True):
+        if len(en_term) < min_len:
+            continue
+        # word-boundary, plural-aware (same logic as _compile_term_matcher in subtitle.py)
+        if en_term.endswith("y"):
+            stem = en_term[:-1]
+            pat = rf"\b{_re.escape(en_term)}\b|\b{_re.escape(stem)}ies\b"
+        else:
+            pat = rf"\b{_re.escape(en_term)}s?\b"
+        if _re.search(pat, en_text, _re.IGNORECASE):
+            matches.append(f"{en_term}={zh_term}")
+    return "; ".join(matches)
 
 
 def get_glossary_for_deepl():

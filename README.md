@@ -259,6 +259,7 @@ Used by subcommands:
 - `--output-dir`
 - `--lang`
 - `--llm`
+- `--translation-engine auto|deepl|ollama|openai` — `openai` selects `openai/gpt-5.6-terra` and disables DeepL
 - `--chunk-length`
 - `--max-tokens`
 - `--timeout`
@@ -267,6 +268,23 @@ Used by subcommands:
 - `--transcribe-lang`
 - `--multi-language`
 - `--verbose`
+
+### OpenAI GPT-5.6-terra translation
+
+Use the OpenAI Platform API key as an environment variable; do not put it in a
+command, config file, or source code. A ChatGPT/Codex subscription does not
+itself supply an API key or API credits.
+
+```bash
+export OPENAI_API_KEY="sk-..."
+uv run wenbi speaker "https://www.youtube.com/watch?v=tFX_IVRAcXI&t=18183s" \
+  --translation-engine openai --lang Chinese --asr-provider gladia -v
+```
+
+With `--translation-engine openai`, the topic grouping, English cleanup, and
+Chinese translation all use GPT-5.6-terra; DeepL and Ollama are not used.
+GPT-5 models only accept `temperature=1`, so Wenbi applies that value even
+when the general CLI default is `0.1`.
 
 ## Glossary
 

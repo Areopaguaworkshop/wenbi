@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 import time
 from typing import Any, Dict, List, Optional
 
@@ -42,6 +43,8 @@ WHISPER_MODELS = {
 # Hardcoded whisper model for the unified dispatch (the --transcribe-model CLI
 # flag is gone). PPT/mutilang still pass their own size; this is the default.
 DEFAULT_WHISPER_MODEL = "large-v3-turbo"
+GLADIA_MAX_DURATION_SECONDS = 8100
+GLADIA_CHUNK_DURATION_SECONDS = 7800
 
 # FunASR paraformer-zh (with sentence timestamps + VAD + punc)
 FUNASR_ZH_WITH_TS = "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
@@ -450,6 +453,79 @@ def prepare_gladia_upload_audio(audio_path: str, verbose: bool = False) -> str:
     return output_path
 
 
+def audio_duration_seconds(audio_path: str) -> float | None:
+    """Return media duration when ffprobe can read it."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", audio_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout = getattr(result, "stdout", b"")
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode("utf-8", errors="replace")
+        duration = float((stdout or "").strip())
+        return duration if duration > 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def create_gladia_chunks(
+    audio_path: str, output_dir: str, duration: float, verbose: bool = False
+) -> list[tuple[float, str]]:
+    """Encode sub-limit chunks for Gladia and return their source offsets."""
+    chunks: list[tuple[float, str]] = []
+    for index, start in enumerate(range(0, int(duration), GLADIA_CHUNK_DURATION_SECONDS), 1):
+        length = min(GLADIA_CHUNK_DURATION_SECONDS, duration - start)
+        chunk_path = os.path.join(output_dir, f"gladia_chunk_{index:03d}.m4a")
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-ss", str(start), "-t", str(length), "-i", audio_path,
+                "-vn", "-acodec", "aac", "-b:a", "64k", "-ar", "16000", "-ac", "1", chunk_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace")
+            raise RuntimeError(f"ffmpeg failed while splitting Gladia chunk {index}: {stderr[-500:]}")
+        chunks.append((float(start), chunk_path))
+    if verbose:
+        logger.debug("Split %.1fs audio into %d Gladia chunks", duration, len(chunks))
+    return chunks
+
+
+def _shift_segment_timestamps(segment: dict[str, Any], offset: float) -> dict[str, Any]:
+    shifted = dict(segment)
+    shifted["start"] = float(shifted.get("start") or 0) + offset
+    shifted["end"] = float(shifted.get("end") or 0) + offset
+    shifted["words"] = [
+        {
+            **word,
+            "start": float(word.get("start") or 0) + offset,
+            "end": float(word.get("end") or 0) + offset,
+        }
+        for word in shifted.get("words") or []
+    ]
+    return shifted
+
+
+def _shift_gladia_result_timestamps(result: dict[str, Any], offset: float) -> dict[str, Any]:
+    """Copy one Gladia response and restore its timestamps to source time."""
+    shifted = json.loads(json.dumps(result))
+    utterances = ((shifted.get("result") or {}).get("transcription") or {}).get("utterances") or []
+    for utterance in utterances:
+        utterance["start"] = float(utterance.get("start") or 0) + offset
+        utterance["end"] = float(utterance.get("end") or 0) + offset
+        for word in utterance.get("words") or []:
+            word["start"] = float(word.get("start") or 0) + offset
+            word["end"] = float(word.get("end") or 0) + offset
+    return shifted
+
+
 def normalize_gladia_utterances(response: dict[str, Any]) -> list[dict[str, Any]]:
     """Convert a Gladia pre-recorded result into normalized segments."""
     transcription = (response.get("result") or {}).get("transcription") or {}
@@ -475,7 +551,7 @@ def normalize_gladia_utterances(response: dict[str, Any]) -> list[dict[str, Any]
     return segments
 
 
-def transcribe_with_gladia(
+def _transcribe_gladia_file(
     audio_path: str,
     api_key: str,
     source_lang: str = "en",
@@ -631,6 +707,76 @@ def transcribe_with_gladia(
             json.dump(result, f, ensure_ascii=False, indent=2)
 
     return normalize_gladia_utterances(result), result
+
+
+def transcribe_with_gladia(
+    audio_path: str,
+    api_key: str,
+    source_lang: str = "en",
+    interpreter_lang: str = "zh",
+    speaker_labels: bool = True,
+    save_raw_json: str | None = None,
+    timeout_seconds: int = 1800,
+    poll_interval: float = 5.0,
+    upload_timeout_seconds: int | None = None,
+    upload_retries: int | None = None,
+    verbose: bool = False,
+    code_switching: bool = True,
+    speaker_count: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Transcribe with Gladia, splitting audio that exceeds its duration limit."""
+    upload_audio_path = prepare_gladia_upload_audio(audio_path, verbose=verbose)
+    duration = audio_duration_seconds(upload_audio_path)
+    kwargs = {
+        "api_key": api_key,
+        "source_lang": source_lang,
+        "interpreter_lang": interpreter_lang,
+        "speaker_labels": speaker_labels,
+        "timeout_seconds": timeout_seconds,
+        "poll_interval": poll_interval,
+        "upload_timeout_seconds": upload_timeout_seconds,
+        "upload_retries": upload_retries,
+        "verbose": verbose,
+        "code_switching": code_switching,
+        "speaker_count": speaker_count,
+    }
+    if duration is None or duration <= GLADIA_MAX_DURATION_SECONDS:
+        return _transcribe_gladia_file(
+            upload_audio_path, save_raw_json=save_raw_json, **kwargs
+        )
+
+    if verbose:
+        logger.debug(
+            "Gladia allows %ds per upload; chunking %.1fs source audio",
+            GLADIA_MAX_DURATION_SECONDS,
+            duration,
+        )
+    all_segments: list[dict[str, Any]] = []
+    raw_utterances: list[dict[str, Any]] = []
+    raw_chunks: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="wenbi_gladia_") as chunk_dir:
+        for offset, chunk_path in create_gladia_chunks(
+            upload_audio_path, chunk_dir, duration, verbose=verbose
+        ):
+            segments, raw_result = _transcribe_gladia_file(chunk_path, **kwargs)
+            all_segments.extend(
+                _shift_segment_timestamps(segment, offset) for segment in segments
+            )
+            shifted_raw = _shift_gladia_result_timestamps(raw_result, offset)
+            raw_chunks.append(shifted_raw)
+            raw_utterances.extend(
+                ((shifted_raw.get("result") or {}).get("transcription") or {}).get("utterances") or []
+            )
+
+    aggregate_result = {
+        "status": "done",
+        "result": {"transcription": {"utterances": raw_utterances}},
+        "chunks": raw_chunks,
+    }
+    if save_raw_json:
+        with open(save_raw_json, "w", encoding="utf-8") as f:
+            json.dump(aggregate_result, f, ensure_ascii=False, indent=2)
+    return all_segments, aggregate_result
 
 
 # ---------------------------------------------------------------------------
